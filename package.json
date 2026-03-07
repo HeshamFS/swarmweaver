@@ -1,0 +1,10 @@
+{
+  "name": "swarmweaver",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Autonomous multi-mode coding agent powered by Claude Agent SDK",
+  "scripts": {
+    "dev": "node dev.mjs",
+    "build": "npm --prefix frontend run build"
+  }
+}

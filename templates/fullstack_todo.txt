@@ -1,0 +1,55 @@
+Full-Stack Todo Application
+============================
+
+Build a classic CRUD todo app with modern stack:
+
+## Tech Stack
+- Frontend: Next.js 15 (App Router) + Tailwind CSS v4
+- Backend: FastAPI (Python)
+- Database: SQLite via aiosqlite
+- Real-time: WebSocket for live updates
+
+## Features
+
+### Todo Management
+- Create todo with title, description, due date, priority (low/medium/high)
+- Edit todo inline or via modal
+- Delete with confirmation
+- Mark complete/incomplete (checkbox)
+- Drag-and-drop reordering
+
+### Organization
+- Categories/Lists (e.g., Work, Personal, Shopping)
+- Create/rename/delete lists
+- Move todos between lists
+- Color-coded list labels
+
+### Filtering & Search
+- Search todos by title
+- Filter by: status (all/active/completed), priority, list
+- Sort by: date created, due date, priority, alphabetical
+
+### UI
+- Clean minimal design
+- Responsive layout (mobile-friendly)
+- Dark mode toggle
+- Empty state illustrations
+- Keyboard shortcuts (n: new todo, / : search, Enter: save)
+- Toast notifications for actions
+
+## API Endpoints
+- GET /api/todos - List todos (with filters)
+- POST /api/todos - Create todo
+- PATCH /api/todos/{id} - Update todo
+- DELETE /api/todos/{id} - Delete todo
+- GET /api/lists - List categories
+- POST /api/lists - Create category
+- WebSocket /ws - Real-time updates
+
+## Requirements
+- Optimistic UI updates
+- Loading skeletons
+- Error handling with retry
+- Data persists across refreshes
+- init.sh script for setup
+- Tests for API endpoints

@@ -1,0 +1,55 @@
+Python CLI Tool
+================
+
+Build a feature-rich command-line tool with the following:
+
+## Tech Stack
+- Python 3.12+
+- Click for CLI framework
+- Rich for terminal formatting
+- TOML for configuration
+- Requests for HTTP
+
+## Commands
+
+### init
+- Interactive project initialization
+- Creates config file (.toolrc.toml)
+- Sets up directory structure
+
+### status
+- Show current project status
+- Rich table output with colors
+- Summary statistics
+
+### run <task>
+- Execute a named task from config
+- Progress bar for long operations
+- Streaming output with timestamps
+
+### config
+- config show - Display current settings
+- config set <key> <value> - Update setting
+- config reset - Reset to defaults
+
+### list
+- List available tasks/items
+- Sortable by name, date, status
+- Filter with --status and --tag flags
+
+### export
+- export csv <output> - Export data as CSV
+- export json <output> - Export data as JSON
+- --format flag for output formatting
+
+## Requirements
+- --verbose / -v flag for debug output
+- --quiet / -q flag for silent mode
+- --config flag to specify config file path
+- Colored output with --no-color fallback
+- Tab completion support (Click)
+- Man page / --help for all commands
+- Error handling with user-friendly messages
+- Unit tests with pytest
+- setup.py / pyproject.toml for packaging
+- Entry point: installed as CLI command

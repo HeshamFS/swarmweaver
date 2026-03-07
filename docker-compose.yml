@@ -1,0 +1,13 @@
+services:
+  swarmweaver:
+    build:
+      context: .
+    ports:
+      - "3000:3000"
+      - "8000:8000"
+    environment:
+      - SWARMWEAVER_CORS_ORIGINS=http://localhost:3000
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-}
+    volumes:
+      - ./generations:/app/generations

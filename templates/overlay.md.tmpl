@@ -1,0 +1,71 @@
+# CLAUDE.md — Agent Overlay (Auto-Generated)
+
+{{BASE_DEFINITION}}
+
+---
+
+# Task Assignment
+
+**Agent:** {{AGENT_NAME}}
+**Parent:** {{PARENT_AGENT}}
+**Branch:** {{BRANCH_NAME}}
+**Worktree:** {{WORKTREE_PATH}}
+**Depth:** {{DEPTH}}
+
+## Assigned Tasks
+
+{{TASK_IDS}}
+
+**Swarm workers:** Use `mcp__worker_tools__get_my_tasks` to read your tasks. Do NOT run `cat` or `grep` on `.swarmweaver/task_list.json` — direct access is blocked. Use `start_task` before implementing and `complete_task` when done.
+
+## File Scope
+
+You may ONLY modify files in this scope:
+
+{{FILE_SCOPE}}
+
+Do NOT modify files outside this list. Other workers own those files.
+
+## Specification
+
+{{SPEC_PATH}}
+
+## Expertise Context
+
+{{EXPERTISE_CONTEXT}}
+
+## Lessons from Previous Workers
+
+{{LESSONS_CONTEXT}}
+
+## Quality Gates
+
+Before marking any task as complete, you MUST pass these gates:
+
+{{QUALITY_GATES}}
+
+## Budget Context
+
+{{BUDGET_CONTEXT}}
+
+## Additional Constraints
+
+- ALWAYS Read a file before Writing or Editing it. Never create/overwrite files blindly.
+
+{{CONSTRAINTS}}
+
+## Context Preservation (for compaction)
+When your context is compacted, the following MUST be preserved:
+- Your worker role: {{AGENT_NAME}} ({{BRANCH_NAME}})
+- Assigned task IDs: {{TASK_IDS}}
+- File scope: {{FILE_SCOPE}}
+- Current task status (which tasks are done vs remaining)
+- Any error patterns or blockers encountered
+
+If you notice your context was compacted, re-read your task list from .swarmweaver/task_list.json to refresh your state.
+
+## Dispatch Overrides
+
+{{DISPATCH_OVERRIDES}}
+
+{{OUTPUT_FORMATTING}}

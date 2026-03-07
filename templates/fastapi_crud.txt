@@ -1,0 +1,54 @@
+FastAPI REST API
+=================
+
+Build a production REST API with the following:
+
+## Tech Stack
+- Python 3.12+
+- FastAPI
+- SQLAlchemy 2.0 (async)
+- Pydantic v2 for validation
+- SQLite (dev) / PostgreSQL ready
+- JWT authentication via python-jose
+- Alembic for migrations
+
+## Models
+- User: id, email, hashed_password, full_name, is_active, created_at
+- Item: id, title, description, owner_id (FK to User), created_at, updated_at
+- Tag: id, name (many-to-many with Item)
+
+## API Endpoints
+
+### Auth
+- POST /auth/register - Create account
+- POST /auth/login - Get JWT token
+- POST /auth/refresh - Refresh token
+- GET /auth/me - Current user profile
+
+### Users (admin)
+- GET /users - List users (paginated)
+- GET /users/{id} - Get user
+- PATCH /users/{id} - Update user
+- DELETE /users/{id} - Deactivate user
+
+### Items (authenticated)
+- GET /items - List items (paginated, filterable)
+- POST /items - Create item
+- GET /items/{id} - Get item
+- PUT /items/{id} - Update item
+- DELETE /items/{id} - Delete item
+- POST /items/{id}/tags - Add tags
+
+### Health
+- GET /health - Service health check
+
+## Requirements
+- OpenAPI docs at /docs (auto-generated)
+- Request validation with clear error messages
+- Pagination (limit/offset) on list endpoints
+- Filtering and sorting on GET /items
+- Rate limiting middleware
+- CORS configuration
+- Structured logging
+- Unit tests with pytest (80%+ coverage)
+- Docker-ready (Dockerfile + docker-compose.yml)

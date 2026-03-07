@@ -1,0 +1,53 @@
+Next.js SaaS Starter Application
+==================================
+
+Build a production-ready SaaS starter with the following:
+
+## Tech Stack
+- Next.js 15 (App Router)
+- React 19
+- Tailwind CSS v4
+- TypeScript
+- SQLite via better-sqlite3 (dev) / PostgreSQL ready
+- NextAuth.js for authentication
+
+## Pages & Features
+
+### Landing Page
+- Hero section with CTA
+- Feature grid (3-4 features with icons)
+- Pricing table (Free / Pro / Enterprise)
+- Testimonials section
+- Footer with links
+
+### Authentication
+- Sign up with email/password
+- Sign in page
+- Password reset flow
+- Protected route middleware
+- Session management
+
+### Dashboard (authenticated)
+- Overview cards (stats: users, revenue, activity)
+- Recent activity feed
+- Quick action buttons
+- Responsive sidebar navigation
+
+### Settings
+- Profile settings (name, email, avatar)
+- Account settings (password change, delete account)
+- Billing page (plan display, upgrade CTA)
+- Notification preferences
+
+### API Routes
+- /api/auth/* (NextAuth handlers)
+- /api/users (CRUD)
+- /api/billing (plan management)
+
+## Requirements
+- Fully responsive (mobile-first)
+- Dark mode support
+- Loading states and error boundaries
+- Form validation with error messages
+- Accessible (ARIA labels, keyboard navigation)
+- SEO meta tags on all public pages

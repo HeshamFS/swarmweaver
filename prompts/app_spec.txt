@@ -1,0 +1,1337 @@
+<project_specification>
+  <project_name>EUActPilot - EU AI Act Autonomous Compliance Engine</project_name>
+
+  <overview>
+    Build an autonomous AI compliance engine designed to help organizations achieve and maintain compliance with 
+    the EU AI Act (Regulation 2024/1689). The platform implements a Marathon Agent architecture using Google's 
+    Gemini 3 API and Agent Development Kit (ADK), providing continuous automated compliance monitoring, 
+    documentation generation, risk classification, and regulatory update tracking.
+
+    Core philosophy: COMPLIANCE-FIRST, EVIDENCE-BASED. Every classification requires multi-agent voting consensus,
+    every documentation section must be complete before export, and every regulatory update triggers impact assessment.
+
+    The platform features specialized agents (Discovery, Classification, Documentation, Monitoring, Regulatory),
+    integrates with the AG-UI Protocol for real-time frontend-agent communication via CopilotKit, and supports
+    the A2A Protocol for agent interoperability. The UI should be professional, compliance-focused, and optimized
+    for enterprise workflows with clear visualization of multi-agent operations.
+
+    Target deadline: August 2, 2026 (EU AI Act full application date)
+    Penalties for non-compliance: Up to €35 million or 7% of global annual turnover
+  </overview>
+
+  <technology_stack>
+    <api_key>
+      You can use an API key located at /tmp/api-key for testing. You will not be allowed to read this file, but you can reference it in code.
+    </api_key>
+    <frontend>
+      <framework>React 18+ with Next.js 14 (App Router)</framework>
+      <styling>Tailwind CSS with custom design system</styling>
+      <state_management>React hooks, Context API, and AG-UI state synchronization</state_management>
+      <routing>Next.js App Router for navigation</routing>
+      <agent_protocol>AG-UI Protocol via CopilotKit (@copilotkit/react-core, @copilotkit/react-ui)</agent_protocol>
+      <charts>Recharts for compliance metrics and risk visualization</charts>
+      <tables>TanStack Table for AI system inventory</tables>
+      <icons>Lucide React for consistent iconography</icons>
+      <pdf_export>React-PDF for documentation export</pdf_export>
+      <port>Only launch on port {frontend_port}</port>
+    </frontend>
+    <backend>
+      <runtime>Python 3.11+ with FastAPI</runtime>
+      <agent_framework>Google Agent Development Kit (ADK) with Gemini 3</agent_framework>
+      <database>PostgreSQL for production, SQLite for development</database>
+      <vector_db>Pinecone or Vertex AI Search for regulatory corpus</vector_db>
+      <cache>Redis for session state and checkpoints</cache>
+      <api_integration>Gemini 3 API (gemini-3-pro-preview, gemini-3-flash-preview)</api_integration>
+      <streaming>Server-Sent Events (SSE) via AG-UI Protocol</streaming>
+      <a2a_protocol>A2A Protocol server for agent interoperability</a2a_protocol>
+    </backend>
+    <communication>
+      <agent_ui>AG-UI Protocol - bidirectional streaming between agents and frontend</agent_ui>
+      <agent_agent>A2A Protocol - agent-to-agent communication</agent_agent>
+      <api>RESTful endpoints for system management</api>
+      <streaming>SSE for real-time agent workflow progress and text streaming</streaming>
+      <state_sync>JSON Patch (RFC 6902) for efficient state updates</state_sync>
+    </communication>
+  </technology_stack>
+
+  <prerequisites>
+    <environment_setup>
+      - Python 3.11+ with Google ADK installed (pip install google-adk google-genai)
+      - Node.js 18+ with pnpm for frontend
+      - GEMINI_API_KEY configured in environment
+      - PostgreSQL or SQLite database
+      - Redis for session management (optional for development)
+      - Frontend dependencies: @copilotkit/react-core, @copilotkit/react-ui
+      - Backend code in /backend directory
+      - Frontend code in /frontend directory
+    </environment_setup>
+  </prerequisites>
+
+  <core_features>
+    <compliance_dashboard>
+      - Enterprise-grade compliance overview
+      - Real-time compliance score (0-100%) across all AI systems
+      - Risk heat map showing systems by risk level and compliance status
+      - Deadline tracker with days remaining to key EU AI Act milestones
+      - Documentation completion progress per system
+      - Alert feed with real-time compliance issues
+      - Regulatory update notifications
+      - Multi-agent workflow visibility
+      - Quick actions for common compliance tasks
+    </compliance_dashboard>
+
+    <ai_system_inventory>
+      - Comprehensive inventory of all AI systems
+      - Auto-discovery from cloud ML platforms (Vertex AI, SageMaker, Azure ML, MLflow)
+      - Manual system registration with structured forms
+      - System metadata: name, description, intended purpose, deployment status
+      - Version tracking and modification history
+      - Business unit and ownership tagging
+      - Risk level and compliance status badges
+      - Search, filter, and sort capabilities
+      - Bulk operations for multiple systems
+    </ai_system_inventory>
+
+    <agentic_classification_workflow>
+      - Natural language classification requests ("Classify this credit scoring system")
+      - Multi-agent orchestration visible to user:
+        - Legal Agent: interprets regulatory text
+        - Technical Agent: analyzes system capabilities
+        - Contextual Agent: evaluates deployment context
+        - Consensus Agent: builds voting consensus
+      - Real-time workflow progress with AG-UI streaming
+      - Classification results with confidence scores (0-1)
+      - Evidence and rationale with EU AI Act article citations
+      - Human review flags for low-confidence (<0.85) classifications
+      - Override capability with documented justification
+      - Classification history and audit trail
+    </agentic_classification_workflow>
+
+    <risk_classification_engine>
+      - Four-tier classification: PROHIBITED / HIGH_RISK / LIMITED_RISK / MINIMAL_RISK
+      - Article 5 prohibited practices detection
+      - Annex III high-risk category mapping (8 categories, 20+ subcategories)
+      - Article 50 transparency requirement detection
+      - Multi-agent voting system for robust decisions
+      - Confidence scoring with automatic human review triggers
+      - Edge case detection and flagging
+      - Classification rationale with regulatory citations
+      - Visual classification decision tree
+    </risk_classification_engine>
+
+    <documentation_generator>
+      - Annex IV compliant technical documentation
+      - Eight required sections:
+        - Section 1: General Description
+        - Section 2: Development Process
+        - Section 3: Data Requirements
+        - Section 4: Performance & Testing
+        - Section 5: Risk Management
+        - Section 6: Human Oversight
+        - Section 7: Monitoring & Logging
+        - Section 8: Conformity
+      - Auto-extraction from ML platforms
+      - Gap identification with required fields
+      - Completion percentage tracking
+      - Version control with change tracking
+      - Export: PDF, DOCX, JSON formats
+      - Template library for common system types
+    </documentation_generator>
+
+    <regulatory_monitor>
+      - Real-time monitoring of regulatory updates
+      - Sources: EUR-Lex, EU AI Office, European AI Board, national authorities
+      - Alert levels: CRITICAL, HIGH, MEDIUM, LOW
+      - Impact assessment for affected AI systems
+      - Recommended actions for compliance
+      - Automatic knowledge base updates
+      - Guidance interpretation assistance
+      - Deadline tracking for new requirements
+    </regulatory_monitor>
+
+    <continuous_compliance_monitoring>
+      - Post-deployment compliance drift detection
+      - Model performance degradation monitoring
+      - Data drift analysis
+      - Usage pattern change detection (purpose creep)
+      - Documentation staleness alerts (>6 months)
+      - CI/CD integration for change detection
+      - Alert dispatch to stakeholders
+      - Remediation workflow triggers
+    </continuous_compliance_monitoring>
+
+    <ag_ui_integration>
+      - Full AG-UI Protocol implementation for agent-frontend communication
+      - Real-time streaming of agent responses via CopilotKit
+      - Bidirectional state synchronization between agents and UI
+      - Tool calls visible in UI with argument streaming
+      - Human-in-the-loop interventions during agent workflows
+      - State snapshots and deltas for efficient updates
+      - Message history management
+      - Activity events for workflow visualization
+      - Middleware support for logging, auth, filtering
+    </ag_ui_integration>
+
+    <a2a_protocol_integration>
+      - A2A server endpoint for external agent interoperability
+      - Agent Card at /.well-known/agent.json
+      - Skills: classify_ai_system, generate_documentation, check_compliance, get_regulatory_updates
+      - Task state management: PENDING, WORKING, COMPLETED, FAILED
+      - Streaming support for long-running operations
+      - Authentication via OAuth2 and API key
+    </a2a_protocol_integration>
+
+    <settings_preferences>
+      - Theme selection (Light, Dark, Auto)
+      - Notification preferences
+      - Default classification settings
+      - API key management (Gemini, cloud platforms)
+      - Organization profile
+      - User management (multi-tenant)
+      - Export preferences
+      - Webhook configuration for alerts
+    </settings_preferences>
+
+    <audit_trail>
+      - Complete audit log of all actions
+      - Classification decisions with rationale
+      - Documentation changes with versions
+      - User actions with timestamps
+      - Compliance status changes
+      - Export for regulatory audits
+      - Retention policy compliance
+    </audit_trail>
+  </core_features>
+
+  <database_schema>
+    <tables>
+      <organizations>
+        - id (UUID), name, domain, industry
+        - eu_operations (boolean)
+        - created_at, updated_at
+      </organizations>
+
+      <users>
+        - id (UUID), organization_id, email, name, role
+        - preferences (JSON: theme, notifications, etc.)
+        - created_at, last_login
+      </users>
+
+      <ai_systems>
+        - id (UUID), organization_id, name, description
+        - intended_purpose (TEXT - critical for classification)
+        - version, deployment_status (prototype/staging/production)
+        - business_unit, owner_email
+        - risk_level (prohibited/high_risk/limited_risk/minimal_risk)
+        - annex_iii_category (1-8), annex_iii_subcategory
+        - classification_confidence (DECIMAL 0-1)
+        - classification_rationale (TEXT)
+        - compliance_status (compliant/non_compliant/in_progress/needs_review/not_assessed)
+        - documentation_complete (boolean)
+        - last_assessment_date, next_review_date
+        - model_type, framework, training_data_summary
+        - input_types (JSON), output_types (JSON)
+        - created_at, updated_at
+      </ai_systems>
+
+      <classification_results>
+        - id (UUID), system_id, risk_level
+        - annex_iii_category, annex_iii_subcategory
+        - confidence_score (DECIMAL 0-1)
+        - rationale (TEXT), evidence (JSON)
+        - human_review_required (boolean), review_reason
+        - legal_vote, technical_vote, contextual_vote
+        - assessed_by (agent identifier), assessed_at
+      </classification_results>
+
+      <technical_documentation>
+        - id (UUID), system_id, version, status (draft/review/approved)
+        - content (JSON - all Annex IV sections)
+        - gaps_identified (JSON)
+        - completion_percentage (DECIMAL)
+        - created_at, updated_at, approved_at, approved_by
+      </technical_documentation>
+
+      <regulatory_updates>
+        - id (UUID), organization_id
+        - source, source_url, title, summary
+        - publication_date, discovered_at
+        - alert_level (critical/high/medium/low)
+        - affected_systems (JSON - system_ids)
+        - compliance_impact, recommended_actions (JSON)
+        - acknowledged (boolean), acknowledged_by, acknowledged_at
+      </regulatory_updates>
+
+      <compliance_alerts>
+        - id (UUID), system_id
+        - alert_type (drift/documentation/regulatory/classification)
+        - severity (critical/high/medium/low)
+        - title, description
+        - detected_at, current_value, threshold_value
+        - recommended_action
+        - resolved (boolean), resolved_at, resolved_by, resolution_notes
+      </compliance_alerts>
+
+      <agent_sessions>
+        - id (UUID), organization_id, user_id
+        - session_type (classification/documentation/monitoring)
+        - status (initialized/running/paused/completed/failed)
+        - started_at, completed_at
+        - checkpoint_data (JSON)
+        - progress_percentage, current_phase
+        - error_message
+      </agent_sessions>
+
+      <agent_workflow_steps>
+        - id (UUID), session_id, agent_name
+        - step_order, status (pending/running/completed/failed)
+        - input_data (JSON), output_data (JSON)
+        - started_at, completed_at
+        - tokens_used, duration_ms
+      </agent_workflow_steps>
+
+      <audit_log>
+        - id (UUID), organization_id, user_id
+        - action, entity_type, entity_id
+        - old_value (JSON), new_value (JSON)
+        - ip_address, user_agent
+        - created_at
+      </audit_log>
+    </tables>
+  </database_schema>
+
+  <api_endpoints_summary>
+    <systems>
+      - GET /api/systems - List all AI systems with filters
+      - POST /api/systems - Register new AI system
+      - GET /api/systems/:id - Get system details
+      - PUT /api/systems/:id - Update system
+      - DELETE /api/systems/:id - Archive system
+      - POST /api/systems/:id/classify - Trigger classification
+      - GET /api/systems/:id/classification - Get classification result
+      - POST /api/systems/:id/documentation - Generate documentation
+      - GET /api/systems/:id/documentation - Get documentation
+      - GET /api/systems/:id/alerts - Get system alerts
+    </systems>
+
+    <classification>
+      - POST /api/classification/run - Run classification workflow
+      - GET /api/classification/:id - Get classification details
+      - PUT /api/classification/:id/override - Override with justification
+      - GET /api/classification/:id/history - Get classification history
+    </classification>
+
+    <documentation>
+      - GET /api/documentation/:id - Get full documentation
+      - PUT /api/documentation/:id - Update documentation
+      - GET /api/documentation/:id/gaps - Get gap analysis
+      - POST /api/documentation/:id/export - Export (PDF/DOCX/JSON)
+      - GET /api/documentation/:id/versions - Get version history
+    </documentation>
+
+    <regulatory>
+      - GET /api/regulatory/updates - List regulatory updates
+      - GET /api/regulatory/updates/:id - Get update details
+      - POST /api/regulatory/updates/:id/acknowledge - Acknowledge update
+      - GET /api/regulatory/impact/:systemId - Get impact for system
+    </regulatory>
+
+    <alerts>
+      - GET /api/alerts - List all alerts
+      - GET /api/alerts/:id - Get alert details
+      - PUT /api/alerts/:id/resolve - Resolve alert
+      - POST /api/alerts/bulk-resolve - Bulk resolve
+    </alerts>
+
+    <dashboard>
+      - GET /api/dashboard/stats - Get dashboard statistics
+      - GET /api/dashboard/risk-matrix - Get risk heat map data
+      - GET /api/dashboard/timeline - Get compliance timeline
+      - GET /api/dashboard/deadlines - Get upcoming deadlines
+    </dashboard>
+
+    <agent_workflows>
+      - POST /api/agent/run - Start agent workflow (AG-UI endpoint)
+      - GET /api/agent/session/:id - Get session status
+      - POST /api/agent/session/:id/cancel - Cancel session
+      - GET /api/agent/session/:id/stream - SSE endpoint for progress
+    </agent_workflows>
+
+    <a2a>
+      - GET /.well-known/agent.json - Agent Card
+      - POST /a2a/tasks - Create task
+      - GET /a2a/tasks/:id - Get task status
+      - POST /a2a/tasks/:id/cancel - Cancel task
+    </a2a>
+  </api_endpoints_summary>
+
+  <ui_layout>
+    <main_structure>
+      - Three-column layout: sidebar (navigation), main (workspace), panel (details/agent)
+      - Collapsible sidebar with resize handle
+      - Responsive breakpoints: mobile (single), tablet (two), desktop (three column)
+      - Persistent header with organization selector, deadline countdown, alert badge
+      - Bottom panel for agent chat interface (CopilotKit)
+    </main_structure>
+
+    <sidebar_navigation>
+      - Logo and organization name
+      - Navigation menu:
+        - Dashboard (compliance overview)
+        - AI Systems (inventory list)
+        - Classifications (history and queue)
+        - Documentation (library)
+        - Regulatory (updates and guidance)
+        - Alerts (compliance issues)
+        - Reports (audit and export)
+        - Settings
+      - Deadline countdown widget
+      - Quick stats (total systems, pending reviews)
+      - User profile at bottom
+    </sidebar_navigation>
+
+    <dashboard_view>
+      - Welcome banner with compliance score
+      - Key metrics cards:
+        - Total AI Systems (by risk level breakdown)
+        - Compliance Score (% with trend)
+        - Pending Reviews (systems needing attention)
+        - Days to Deadline (August 2, 2026)
+        - Documentation Completion (%)
+        - Active Alerts (by severity)
+      - Risk heat map (risk level × compliance status matrix)
+      - Recent activity feed
+      - Regulatory updates panel
+      - Upcoming deadlines timeline
+      - Quick action buttons:
+        - Add New System
+        - Run Classification
+        - Generate Documentation
+        - Start Compliance Scan
+    </dashboard_view>
+
+    <systems_list_view>
+      - Search and filter bar
+      - Filters: risk level, compliance status, business unit, owner
+      - Table with columns:
+        - System Name
+        - Risk Level (colored badge)
+        - Annex III Category
+        - Compliance Status
+        - Documentation (% complete)
+        - Last Assessment
+        - Owner
+        - Actions
+      - Bulk action bar (when items selected)
+      - Pagination and items per page
+      - Add System button (opens modal)
+      - Export to CSV
+    </systems_list_view>
+
+    <system_detail_view>
+      - System header: name, risk badge, status, actions
+      - Tabs:
+        - Overview: metadata, classification summary
+        - Classification: full classification result, voting breakdown
+        - Documentation: Annex IV sections, completion status
+        - Compliance: requirements checklist, gaps
+        - Alerts: system-specific alerts
+        - History: audit trail, version history
+      - Right panel: agent chat for system-specific queries
+      - Action buttons: Reclassify, Generate Docs, Run Scan
+    </system_detail_view>
+
+    <classification_workflow_view>
+      - Workflow header with status and progress
+      - Multi-agent visualization:
+        - Horizontal step indicator showing agents
+        - Active agent highlighted with animation
+        - Agent output streaming in real-time
+      - Classification result panel (when complete):
+        - Risk level with confidence
+        - Voting breakdown (Legal/Technical/Contextual)
+        - Evidence and rationale
+        - Article citations
+        - Human review flag (if needed)
+      - Override panel (if admin):
+        - Override reason input
+        - New classification selector
+        - Submit override button
+    </classification_workflow_view>
+
+    <documentation_view>
+      - Document header: system name, version, status
+      - Section navigation (8 Annex IV sections)
+      - Section editor with:
+        - Section title and description
+        - Required fields checklist
+        - Content editor (markdown-capable)
+        - Gap warnings with amber highlights
+        - Auto-fill button (triggers agent)
+      - Completion meter showing overall %
+      - Export button (disabled if incomplete)
+      - Version history dropdown
+      - Approve button (for authorized users)
+    </documentation_view>
+
+    <agent_chat_panel>
+      - CopilotKit CopilotSidebar or CopilotPopup component
+      - Chat interface with:
+        - Message history
+        - Streaming agent responses
+        - Tool call visualization
+        - Activity events (workflow progress)
+      - State synchronization with current view
+      - Context-aware suggestions
+      - Human-in-the-loop confirmations
+      - Quick prompts:
+        - "Classify this system"
+        - "Generate documentation for Section 5"
+        - "What are the latest regulatory updates?"
+        - "Check compliance status"
+    </agent_chat_panel>
+
+    <modals_overlays>
+      - Add/Edit System modal
+      - Classification result modal
+      - Export options modal
+      - Regulatory update detail modal
+      - Alert resolution modal
+      - Settings modal (tabbed)
+      - Keyboard shortcuts reference
+      - Help/Documentation modal
+    </modals_overlays>
+  </ui_layout>
+
+  <design_system>
+    <color_palette>
+      - Primary: Deep blue (#1E3A8A) - professional, trustworthy
+      - Secondary: EU gold (#FFD617) - for compliance highlights
+      - Background: Cool white (#F8FAFC light), Slate (#0F172A dark)
+      - Surface: Gray (#F1F5F9 light), Dark slate (#1E293B dark)
+      - Text: Slate (#1E293B light), Gray (#E2E8F0 dark)
+      - Borders: Light gray (#E2E8F0 light), Dark gray (#334155 dark)
+      - Risk colors:
+        - Prohibited: Red (#DC2626)
+        - High-Risk: Orange (#EA580C)
+        - Limited Risk: Yellow (#CA8A04)
+        - Minimal Risk: Green (#16A34A)
+      - Compliance status:
+        - Compliant: Green (#16A34A)
+        - Non-compliant: Red (#DC2626)
+        - In Progress: Blue (#2563EB)
+        - Needs Review: Amber (#D97706)
+        - Not Assessed: Gray (#6B7280)
+      - Alert severity:
+        - Critical: Red (#DC2626)
+        - High: Orange (#EA580C)
+        - Medium: Yellow (#CA8A04)
+        - Low: Blue (#3B82F6)
+    </color_palette>
+
+    <typography>
+      - Sans-serif system font stack (Inter, SF Pro, Roboto, system-ui)
+      - Headings: font-semibold, tight tracking
+      - Body: font-normal, relaxed leading
+      - Data/metrics: font-medium, tabular-nums
+      - Code/technical: JetBrains Mono, Consolas
+      - Labels: text-sm, uppercase tracking-wide (for badges)
+    </typography>
+
+    <components>
+      <risk_badge>
+        - Rounded pill shape
+        - Risk-appropriate background color
+        - Icon + text: "⚠️ HIGH-RISK" or "✓ MINIMAL"
+        - Hover shows Annex III category
+      </risk_badge>
+
+      <compliance_meter>
+        - Circular or horizontal progress indicator
+        - Color gradient from red to green
+        - Percentage in center
+        - Tooltip with breakdown
+      </compliance_meter>
+
+      <agent_workflow_stepper>
+        - Horizontal or vertical step indicator
+        - Steps: Discovery → Classification → Documentation → Review
+        - Active step animated/pulsing
+        - Completed steps with checkmark
+        - Agent icon per step
+        - Progress bar between steps
+      </agent_workflow_stepper>
+
+      <streaming_text>
+        - Typewriter effect for agent responses
+        - Cursor blink while generating
+        - Smooth scroll to bottom
+        - Stop generation button
+      </streaming_text>
+
+      <voting_breakdown>
+        - Three-column display (Legal/Technical/Contextual)
+        - Vote indicator (PROHIBITED/HIGH/LIMITED/MINIMAL)
+        - Confidence bar per voter
+        - Consensus indicator at bottom
+      </voting_breakdown>
+
+      <deadline_countdown>
+        - Prominent display of days remaining
+        - Progress bar showing time elapsed
+        - Color changes as deadline approaches
+        - Tooltip with exact date
+      </deadline_countdown>
+
+      <buttons>
+        - Primary: Blue background, white text
+        - Secondary: Border style with hover fill
+        - Danger: Red for destructive actions
+        - Ghost: Transparent with hover background
+        - Icon buttons: Square with hover state
+      </buttons>
+
+      <inputs>
+        - Rounded borders with focus ring
+        - Clear label positioning
+        - Error states with red border and message
+        - Disabled states with reduced opacity
+      </inputs>
+
+      <cards>
+        - Subtle shadow or border
+        - Rounded corners (8px)
+        - Padding: p-4 to p-6
+        - Hover state: slight elevation
+        - Status stripe on left edge
+      </cards>
+    </components>
+
+    <animations>
+      - Smooth transitions (150-300ms)
+      - Agent step progression animation
+      - Streaming text cursor blink
+      - Risk badge pulse on change
+      - Slide-in for panels
+      - Skeleton loaders for async content
+      - Success/error state animations
+      - Progress bar smooth updates
+    </animations>
+  </design_system>
+
+  <key_interactions>
+    <classification_workflow>
+      1. User selects AI system or enters description
+      2. User clicks "Classify" or uses agent chat: "Classify this system"
+      3. AG-UI workflow starts with RunStarted event
+      4. Multi-agent workflow visible in UI:
+         a. Legal Agent analyzes regulatory text (StepStarted/StepFinished)
+         b. Technical Agent evaluates capabilities
+         c. Contextual Agent assesses deployment context
+         d. Consensus Agent builds voting result
+      5. Agent responses stream via TextMessageContent events
+      6. Tool calls shown with ToolCallStart/ToolCallArgs/ToolCallEnd
+      7. State updates via StateDelta events sync UI
+      8. Classification result displayed with voting breakdown
+      9. If confidence < 0.85: Human review flag shown
+      10. User can override with documented justification
+      11. Result saved to database, audit log updated
+    </classification_workflow>
+
+    <documentation_generation>
+      1. User navigates to system documentation page
+      2. User clicks "Generate Documentation" or uses agent chat
+      3. Agent workflow starts, progress shown in stepper
+      4. Each Annex IV section generated sequentially:
+         - Agent streams section content via AG-UI
+         - UI updates section in real-time
+         - Gaps identified and highlighted
+      5. User reviews generated content
+      6. User can edit sections manually
+      7. User can request regeneration for specific sections
+      8. Completion percentage updates automatically
+      9. When 100% complete, Export button enabled
+      10. User exports to PDF/DOCX/JSON
+    </documentation_generation>
+
+    <agent_chat_interaction>
+      1. User opens agent chat (CopilotKit sidebar/popup)
+      2. User types natural language request
+      3. Request sent to AG-UI endpoint via CopilotKit
+      4. Agent processes request with appropriate specialized agents
+      5. Response streams back via AG-UI events:
+         - TextMessageStart initiates message
+         - TextMessageContent streams text chunks
+         - ToolCallStart/Args/End for tool usage
+         - StateDelta updates application state
+         - TextMessageEnd completes message
+      6. UI displays streaming response
+      7. Tool calls rendered with expandable details
+      8. State changes reflected in dashboard/views
+      9. Human-in-the-loop: Agent can request confirmation
+      10. User can stop generation, retry, or provide feedback
+    </agent_chat_interaction>
+
+    <regulatory_update_handling>
+      1. Regulatory Monitor Agent detects new update
+      2. Alert created with severity level
+      3. Notification appears in dashboard
+      4. User clicks to view update details
+      5. Impact assessment shows affected systems
+      6. Recommended actions listed
+      7. User can ask agent for interpretation
+      8. User acknowledges update
+      9. Affected systems flagged for review
+      10. Follow-up tasks created if needed
+    </regulatory_update_handling>
+
+    <compliance_monitoring>
+      1. Monitoring Agent runs on schedule (daily/weekly)
+      2. Agent checks for:
+         - Model performance degradation
+         - Data drift
+         - Usage pattern changes
+         - Documentation staleness
+      3. Issues detected create alerts
+      4. Alerts appear in dashboard and system views
+      5. User investigates alert details
+      6. User takes remediation action
+      7. User resolves alert with notes
+      8. Audit log records resolution
+    </compliance_monitoring>
+  </key_interactions>
+
+  <implementation_steps>
+    <step number="1">
+      <title>Setup Project Foundation and Database</title>
+      <tasks>
+        - Initialize Next.js frontend with TypeScript
+        - Set up FastAPI backend with Google ADK
+        - Configure PostgreSQL/SQLite database
+        - Create database schema and migrations
+        - Set up Redis for session management
+        - Configure Gemini API client
+        - Implement health check endpoints
+        - Set up development environment scripts
+      </tasks>
+    </step>
+
+    <step number="2">
+      <title>Implement AG-UI Protocol Integration</title>
+      <tasks>
+        - Install @copilotkit/react-core and @copilotkit/react-ui
+        - Configure CopilotKit provider in layout
+        - Create AG-UI endpoint in FastAPI backend
+        - Implement ADK agent with AG-UI middleware
+        - Set up SSE streaming for events
+        - Implement state synchronization (snapshots/deltas)
+        - Create CopilotChat/Sidebar component
+        - Test bidirectional communication
+      </tasks>
+    </step>
+
+    <step number="3">
+      <title>Build Classification Engine with Multi-Agent Voting</title>
+      <tasks>
+        - Create MarathonCoordinator agent
+        - Implement Legal Classifier agent
+        - Implement Technical Classifier agent
+        - Implement Contextual Classifier agent
+        - Create Consensus Builder agent
+        - Build ParallelAgent for voting system
+        - Implement classification workflow
+        - Create classification result storage
+        - Add confidence scoring logic
+        - Implement human review flagging
+      </tasks>
+    </step>
+
+    <step number="4">
+      <title>Build Documentation Generator</title>
+      <tasks>
+        - Create Documentation Generator agent
+        - Build Annex IV section templates
+        - Implement metadata extraction from ML platforms
+        - Create gap analysis tool
+        - Build section-by-section generation workflow
+        - Implement completion percentage tracking
+        - Create PDF/DOCX export functionality
+        - Add version control for documents
+      </tasks>
+    </step>
+
+    <step number="5">
+      <title>Build Compliance Dashboard</title>
+      <tasks>
+        - Create main dashboard layout
+        - Implement compliance score calculation
+        - Build risk heat map visualization
+        - Create deadline countdown component
+        - Build recent activity feed
+        - Implement quick stats cards
+        - Create regulatory updates panel
+        - Add quick action buttons
+      </tasks>
+    </step>
+
+    <step number="6">
+      <title>Build AI Systems Management</title>
+      <tasks>
+        - Create systems list view with table
+        - Implement search and filtering
+        - Build system detail view with tabs
+        - Create add/edit system modal
+        - Implement bulk operations
+        - Add export to CSV functionality
+        - Build system-specific agent chat
+        - Implement audit trail display
+      </tasks>
+    </step>
+
+    <step number="7">
+      <title>Implement Regulatory Monitor and Alerts</title>
+      <tasks>
+        - Create Regulatory Monitor agent
+        - Implement EUR-Lex/AI Office source scrapers
+        - Build alert creation and notification
+        - Create alert management views
+        - Implement alert resolution workflow
+        - Build impact assessment functionality
+        - Add webhook notifications
+        - Create regulatory knowledge base
+      </tasks>
+    </step>
+
+    <step number="8">
+      <title>Implement A2A Protocol Server</title>
+      <tasks>
+        - Create Agent Card at /.well-known/agent.json
+        - Implement A2A skill handlers
+        - Create task management endpoints
+        - Implement streaming for long operations
+        - Add authentication (OAuth2/API key)
+        - Build task state management
+        - Test interoperability with external agents
+      </tasks>
+    </step>
+
+    <step number="9">
+      <title>Settings, Preferences, and Multi-tenant</title>
+      <tasks>
+        - Build settings modal with tabs
+        - Implement theme switching
+        - Create user management
+        - Build organization settings
+        - Implement API key management
+        - Add notification preferences
+        - Create export preferences
+        - Implement audit log viewer
+      </tasks>
+    </step>
+
+    <step number="10">
+      <title>Polish and Quality Assurance</title>
+      <tasks>
+        - Implement comprehensive error handling
+        - Add loading states and skeletons
+        - Optimize streaming performance
+        - Implement keyboard shortcuts
+        - Add accessibility improvements
+        - Create onboarding flow
+        - Build help documentation
+        - Performance optimization
+        - Security audit
+        - End-to-end testing
+      </tasks>
+    </step>
+  </implementation_steps>
+
+  <success_criteria>
+    <functionality>
+      - Multi-agent classification workflow executes with visible progress
+      - AG-UI streaming provides real-time agent communication
+      - Classification voting system produces consensus with confidence scores
+      - Annex IV documentation generates with >80% completion
+      - Regulatory updates detected and alerts created
+      - A2A Protocol enables external agent interoperability
+      - All CRUD operations work for systems, docs, alerts
+    </functionality>
+
+    <compliance_accuracy>
+      - Classification accuracy >90% agreement with legal experts
+      - All Article 5 prohibited practices correctly identified
+      - Annex III categories correctly mapped
+      - Article 50 transparency requirements detected
+      - Edge cases flagged for human review
+      - Classification rationale includes correct article citations
+    </compliance_accuracy>
+
+    <user_experience>
+      - Agent responses stream in real-time (no blocking)
+      - Classification workflow visible and transparent
+      - Dashboard provides actionable compliance overview
+      - Systems management is efficient for large inventories
+      - Documentation editing is intuitive
+      - Alert management helps prioritize compliance work
+      - Agent chat provides helpful, contextual assistance
+    </user_experience>
+
+    <technical_quality>
+      - Clean, maintainable code structure
+      - Proper error handling throughout
+      - Secure API key management
+      - Optimized database queries
+      - Efficient AG-UI event streaming
+      - Session state persists across interruptions
+      - Comprehensive logging and monitoring
+      - Test coverage >80%
+    </technical_quality>
+
+    <design_polish>
+      - Professional, enterprise-grade visual design
+      - Clear visual hierarchy
+      - Risk levels immediately distinguishable
+      - Agent workflow visualization intuitive
+      - Dark mode fully implemented
+      - Responsive across devices
+      - Accessible (WCAG 2.1 AA)
+      - Print-friendly export layouts
+    </design_polish>
+
+    <ag_ui_integration>
+      - All 16 AG-UI event types properly handled
+      - State synchronization works bidirectionally
+      - Tool calls display with streaming arguments
+      - Human-in-the-loop interrupts work correctly
+      - Session can be serialized/restored
+      - Middleware chain processes events correctly
+    </ag_ui_integration>
+  </success_criteria>
+
+  <user_personas>
+    <primary_persona>
+      <name>Sarah Chen - Compliance Director</name>
+      <role>Director of AI Compliance, Fortune 500 Company</role>
+      <company_context>150 AI systems, €5B annual revenue, EU operations</company_context>
+      <goals>
+        - Achieve compliance before August 2026 deadline
+        - Reduce compliance cost by 50%
+        - Maintain audit-ready documentation
+      </goals>
+      <pain_points>
+        - No visibility into all AI systems across business units
+        - Legal and engineering teams speak different languages
+        - Guidance keeps changing; hard to keep up
+      </pain_points>
+    </primary_persona>
+
+    <secondary_persona>
+      <name>Marcus Weber - AI/ML Engineer</name>
+      <role>Senior ML Engineer, AI Platform Team</role>
+      <responsibility>25 AI models in production</responsibility>
+      <goals>
+        - Understand compliance requirements for each model
+        - Generate required documentation without massive effort
+        - Know when model updates trigger re-assessment
+      </goals>
+      <pain_points>
+        - Compliance requirements are written in legal jargon
+        - Documentation templates are 100+ pages
+        - No automated way to track model changes vs. compliance status
+      </pain_points>
+    </secondary_persona>
+
+    <tertiary_persona>
+      <name>Dr. Anna Müller - Legal Counsel</name>
+      <role>In-House AI Legal Counsel</role>
+      <goals>
+        - Accurate risk classifications with legal defensibility
+        - Documentation that passes regulatory scrutiny
+        - Track regulatory guidance evolution
+      </goals>
+      <pain_points>
+        - Engineering teams don't understand legal requirements
+        - Hard to translate technical systems into legal categories
+        - National authority guidance varies by member state
+      </pain_points>
+    </tertiary_persona>
+  </user_personas>
+
+  <non_functional_requirements>
+    <performance>
+      - Process 500 AI systems within 24-hour Marathon Agent session
+      - Dashboard updates within 5 minutes of status changes
+      - Classification response time < 30 seconds for single system
+      - Documentation generation < 10 minutes per system
+    </performance>
+
+    <scalability>
+      - Support organizations with 1-10,000 AI systems
+      - Concurrent users: 100+ per organization
+      - API rate limiting: 1000 requests/minute per org
+    </scalability>
+
+    <availability>
+      - 99.9% uptime for SaaS platform
+      - Graceful degradation during API outages
+      - Session recovery from checkpoints
+    </availability>
+
+    <security>
+      - SOC 2 Type II compliant
+      - Data encrypted at rest (AES-256) and in transit (TLS 1.3)
+      - API key rotation support
+      - Role-based access control (RBAC)
+      - Audit logging for all sensitive operations
+    </security>
+
+    <compliance>
+      - GDPR compliant data handling
+      - Data residency options (EU-only)
+      - Right to erasure support
+      - Data processing agreements
+    </compliance>
+
+    <context_capacity>
+      - Maintain 1M token context for full regulatory corpus
+      - Session state persistence across interruptions
+      - Checkpoint-based recovery for long-running operations
+    </context_capacity>
+  </non_functional_requirements>
+
+  <accessibility>
+    <requirements>
+      - WCAG 2.1 AA compliance
+      - Full keyboard navigation for all features
+      - Screen reader support (ARIA labels and roles)
+      - High contrast mode support
+      - Focus management and visible focus indicators
+      - Reduced motion support for animations
+      - Minimum touch target sizes (44x44px)
+      - Color-blind friendly risk indicators (patterns + colors)
+    </requirements>
+
+    <implementation>
+      - Use semantic HTML elements
+      - Provide alt text for all informational images
+      - Ensure form labels are properly associated
+      - Support text scaling up to 200%
+      - Provide skip navigation links
+      - Announce dynamic content changes to screen readers
+    </implementation>
+  </accessibility>
+
+  <responsive_design>
+    <breakpoints>
+      - Desktop: 1280px+ (full three-column layout)
+      - Tablet: 768px-1279px (two-column, collapsible sidebar)
+      - Mobile: below 768px (single column, bottom nav)
+    </breakpoints>
+
+    <layout_adaptations>
+      - Desktop-first design for compliance workflows
+      - Tablet support for document review and approvals
+      - Mobile for alerts, status checks, and quick actions
+      - Collapsible panels for focus mode
+      - Print-optimized layouts for documentation export
+      - PWA support for offline access to cached data
+    </layout_adaptations>
+
+    <touch_optimization>
+      - Larger tap targets on mobile
+      - Swipe gestures for navigation
+      - Pull-to-refresh for dashboard data
+    </touch_optimization>
+  </responsive_design>
+
+  <onboarding>
+    <welcome_flow>
+      - Welcome screen explaining EU AI Act compliance workflow
+      - Organization profile setup (name, industry, EU operations)
+      - API key configuration (Gemini, cloud ML platforms)
+      - Initial AI system import/discovery wizard
+    </welcome_flow>
+
+    <guided_tours>
+      - Dashboard overview tour
+      - Classification workflow demonstration
+      - Documentation generation walkthrough
+      - Multi-agent visualization explanation
+    </guided_tours>
+
+    <sample_data>
+      - Demo organization with sample AI systems
+      - Pre-classified example systems across all risk levels
+      - Sample Annex IV documentation
+      - Example compliance alerts and resolutions
+    </sample_data>
+
+    <learning_resources>
+      - EU AI Act deadline awareness (August 2, 2026)
+      - Risk classification quick reference
+      - Annex III category guide
+      - Documentation requirements checklist
+      - Video tutorials for key workflows
+    </learning_resources>
+  </onboarding>
+
+  <eu_ai_act_reference>
+    <classification_decision_tree>
+      Step 1: Check Article 5 (Prohibited AI) → If YES → PROHIBITED
+      Step 2: Check Article 6(1) (Safety Component in Annex I product) → If YES → HIGH-RISK
+      Step 3: Check Annex III categories → If YES and significant harm risk → HIGH-RISK
+      Step 4: Check Article 50 (Transparency requirements) → If YES → LIMITED_RISK
+      Step 5: All other systems → MINIMAL_RISK
+    </classification_decision_tree>
+
+    <prohibited_practices>
+      - P1: Subliminal manipulation causing harm (Art. 5(1)(a))
+      - P2: Exploitation of vulnerabilities (age, disability) (Art. 5(1)(b))
+      - P3: Social scoring by public authorities (Art. 5(1)(c))
+      - P4: Crime prediction based solely on profiling (Art. 5(1)(d))
+      - P5: Facial recognition database scraping (Art. 5(1)(e))
+      - P6: Emotion recognition in workplace/education (Art. 5(1)(f))
+      - P7: Biometric categorization by sensitive characteristics (Art. 5(1)(g))
+      - P8: Real-time remote biometric ID in public (with exceptions) (Art. 5(1)(h))
+    </prohibited_practices>
+
+    <annex_iii_categories_detail>
+      <category_1>
+        <name>Biometrics</name>
+        <subcategories>
+          - 1(a): Remote biometric identification (non-real-time)
+          - 1(b): Biometric categorization (non-sensitive attributes)
+        </subcategories>
+        <examples>Post-event facial recognition, age/gender estimation</examples>
+      </category_1>
+
+      <category_2>
+        <name>Critical Infrastructure</name>
+        <subcategories>
+          - 2(a): Safety components of critical infrastructure
+          - 2(b): Road traffic management
+          - 2(c): Water, gas, heating, electricity supply
+        </subcategories>
+        <examples>Power grid control AI, traffic signal optimization, smart grid AI</examples>
+      </category_2>
+
+      <category_3>
+        <name>Education and Vocational Training</name>
+        <subcategories>
+          - 3(a): Admission/assignment to educational institutions
+          - 3(b): Assessment/grading of learning outcomes
+          - 3(c): Evaluation of appropriate education level
+          - 3(d): Proctoring/cheating detection
+        </subcategories>
+        <examples>University admission AI, automated essay grading, online exam monitoring</examples>
+      </category_3>
+
+      <category_4>
+        <name>Employment and Worker Management</name>
+        <subcategories>
+          - 4(a): Recruitment/screening
+          - 4(b): Decision-making on applications
+          - 4(c): Promotion/termination decisions
+          - 4(d): Task allocation based on individual behavior
+          - 4(e): Performance/behavior monitoring
+        </subcategories>
+        <examples>Resume screening AI, candidate ranking, employee productivity tracking</examples>
+      </category_4>
+
+      <category_5>
+        <name>Essential Private/Public Services</name>
+        <subcategories>
+          - 5(a): Credit scoring (natural persons)
+          - 5(b): Insurance risk assessment (life/health)
+          - 5(c): Emergency services dispatch
+          - 5(d): Emergency triage
+        </subcategories>
+        <examples>Consumer loan assessment, health insurance pricing AI, 911 call priority AI</examples>
+      </category_5>
+
+      <category_6>
+        <name>Law Enforcement</name>
+        <subcategories>
+          - 6(a): Crime victim risk assessment
+          - 6(b): Polygraph/lie detection
+          - 6(c): Evidence reliability assessment
+          - 6(d): Crime prediction (with additional factors)
+          - 6(e): Profiling in investigation/prosecution
+        </subcategories>
+        <examples>Domestic violence risk AI, deception detection AI, recidivism prediction</examples>
+      </category_6>
+
+      <category_7>
+        <name>Migration, Asylum, and Border Control</name>
+        <subcategories>
+          - 7(a): Polygraph for immigration
+          - 7(b): Risk assessment for entry
+          - 7(c): Asylum/visa application processing
+          - 7(d): Irregular migration detection
+        </subcategories>
+        <examples>Border interview AI, traveler risk scoring, document verification AI</examples>
+      </category_7>
+
+      <category_8>
+        <name>Justice and Democratic Processes</name>
+        <subcategories>
+          - 8(a): Legal research/interpretation
+          - 8(b): Dispute resolution
+          - 8(c): Election/referendum influence
+        </subcategories>
+        <examples>AI legal research tools, AI mediation tools, voter targeting AI</examples>
+      </category_8>
+    </annex_iii_categories_detail>
+
+    <limited_risk_requirements>
+      - Chatbots: Inform user they're interacting with AI
+      - Emotion recognition: Inform subjects of the system
+      - Biometric categorization: Inform subjects
+      - Deepfakes/Synthetic content: Label as AI-generated
+    </limited_risk_requirements>
+
+    <provider_obligations>
+      - Risk Management System (Article 9)
+      - Data Governance (Article 10)
+      - Technical Documentation (Article 11 + Annex IV)
+      - Record-Keeping (Article 12)
+      - Transparency (Article 13)
+      - Human Oversight (Article 14)
+      - Accuracy, Robustness, Cybersecurity (Article 15)
+      - Quality Management System (Article 17)
+      - Conformity Assessment (Article 43)
+      - EU Declaration of Conformity (Article 47)
+      - CE Marking (Article 48)
+      - Registration in EU Database (Article 49)
+      - Post-Market Monitoring (Article 72)
+    </provider_obligations>
+
+    <gpai_requirements>
+      <all_gpai_models>
+        - Technical documentation (training/testing process, evaluation results)
+        - Information for downstream providers (capabilities, limitations)
+        - Copyright compliance policy
+        - Publicly available training data summary
+      </all_gpai_models>
+
+      <systemic_risk_gpai>
+        - Model evaluation using standardized protocols
+        - Adversarial testing (red-teaming)
+        - Systemic risk tracking and mitigation
+        - Serious incident reporting
+        - Adequate cybersecurity protection
+        - Threshold: Training compute > 10^25 FLOPs OR Commission designation
+      </systemic_risk_gpai>
+    </gpai_requirements>
+
+    <implementation_timeline>
+      - August 1, 2024: Entry into force
+      - February 2, 2025: Prohibited AI and AI literacy obligations
+      - August 2, 2025: GPAI rules, governance, most penalties
+      - August 2, 2026: Full high-risk requirements (Annex III) - TARGET DEADLINE
+      - August 2, 2027: High-risk in regulated products (Annex I)
+      - December 31, 2030: Large-scale IT systems compliance
+    </implementation_timeline>
+
+    <penalties_structure>
+      - Prohibited AI practices: €35 million OR 7% global annual turnover
+      - High-risk requirements breach: €15 million OR 3% global turnover
+      - Incorrect information to authorities: €7.5 million OR 1% global turnover
+      - SME/Startup: Lower caps apply
+    </penalties_structure>
+  </eu_ai_act_reference>
+
+  <compliance_checklist>
+    <pre_launch_high_risk>
+      - Risk Classification Documented
+        - Article 6 analysis complete
+        - Annex III category identified
+        - Non-high-risk exception documented (if applicable)
+      - Risk Management System
+        - Risk identification complete
+        - Mitigation measures implemented
+        - Testing against thresholds complete
+      - Data Governance
+        - Training data documented
+        - Bias assessment complete
+        - Data quality measures in place
+      - Technical Documentation
+        - Annex IV sections complete
+        - Documentation version controlled
+        - Gaps identified and addressed
+      - Transparency and Human Oversight
+        - Instructions for use prepared
+        - Human oversight mechanisms designed
+        - Intervention capabilities documented
+      - Conformity Assessment
+        - Appropriate procedure identified
+        - Assessment complete
+        - EU Declaration of Conformity signed
+        - CE marking applied
+      - Registration
+        - Registered in EU database
+        - Registration information current
+    </pre_launch_high_risk>
+
+    <post_launch_ongoing>
+      - Monitoring
+        - Post-market monitoring active
+        - Incident reporting procedures in place
+        - Log retention policies followed
+      - Updates
+        - Documentation kept current
+        - Substantial modifications trigger re-assessment
+        - Regulatory updates tracked
+    </post_launch_ongoing>
+  </compliance_checklist>
+
+  <testing>
+    <classification_test_cases>
+      - Social scoring by public authorities → PROHIBITED
+      - Credit scoring for loans → HIGH-RISK (Category 5)
+      - Resume screening AI → HIGH-RISK (Category 4)
+      - Customer service chatbot → LIMITED_RISK
+      - Email spam filter → MINIMAL_RISK
+      - Emotion recognition in workplace → PROHIBITED or HIGH-RISK (requires review)
+      - Medical diagnostic AI → HIGH-RISK (Annex I - MDR)
+      - Content recommendation → MINIMAL (unless manipulative)
+    </classification_test_cases>
+
+    <edge_case_scenarios>
+      - AI for internal employee feedback surveys (no consequences) → MINIMAL
+      - AI suggesting (not deciding) candidates → HIGH-RISK (conservative)
+      - Chatbot providing loan information only → LIMITED
+      - AI proctoring in corporate training → Case-by-case analysis
+    </edge_case_scenarios>
+
+    <test_coverage_requirements>
+      - Unit tests: >80% code coverage
+      - Integration tests: All API endpoints
+      - Classification tests: All Annex III categories
+      - Documentation tests: All Annex IV sections
+      - E2E tests: Complete user workflows
+    </test_coverage_requirements>
+  </testing>
+
+  <glossary>
+    <terms>
+      - AI system: Machine-based system designed to operate with varying levels of autonomy, exhibiting adaptiveness, inferring from input to generate outputs
+      - Provider: Natural/legal person that develops or has AI system developed and places it on market under own name
+      - Deployer: Natural/legal person using an AI system under its authority (except personal non-professional use)
+      - Intended purpose: Use for which AI system is intended by provider as stated in documentation
+      - Reasonably foreseeable misuse: Use not intended but may result from reasonably foreseeable human behavior
+      - Placing on market: First making available on EU market
+      - Putting into service: Supply for first use directly to deployer or own use
+      - High-risk AI system: AI system referred to in Article 6
+      - Fundamental rights: Rights in EU Charter of Fundamental Rights
+      - Marathon Agent: AI agent designed to run for extended periods (hours to days)
+      - Annex III: EU AI Act appendix listing high-risk AI categories
+      - Annex IV: EU AI Act appendix specifying technical documentation requirements
+      - GPAI: General Purpose AI (models like GPT, Gemini)
+      - ADK: Google Agent Development Kit
+      - A2A: Agent-to-Agent Protocol
+      - AG-UI: Agent-UI Protocol for frontend-agent communication
+      - Conformity Assessment: Process to verify AI system meets requirements
+    </terms>
+  </glossary>
+</project_specification>

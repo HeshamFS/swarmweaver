@@ -1,0 +1,49 @@
+"""Application factory for SwarmWeaver API."""
+
+import os
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from api.routers import runs, tasks, swarm, worktree, budget, memory, github
+from api.routers import projects, sessions, settings, system, wizard
+from api.websocket import run as ws_run, wizard as ws_wizard
+
+
+def create_app() -> FastAPI:
+    """Build and return the configured FastAPI application."""
+    app = FastAPI(title="SwarmWeaver API", version="1.0.0")
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=os.environ.get(
+            "SWARMWEAVER_CORS_ORIGINS", "http://localhost:3000"
+        ).split(","),
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # REST routers
+    app.include_router(runs.router)
+    app.include_router(tasks.router)
+    app.include_router(swarm.router)
+    app.include_router(worktree.router)
+    app.include_router(budget.router)
+    app.include_router(memory.router)
+    app.include_router(github.router)
+    app.include_router(projects.router)
+    app.include_router(sessions.router)
+    app.include_router(settings.router)
+    app.include_router(system.router)
+    app.include_router(wizard.router)
+
+    # WebSocket routers
+    app.include_router(ws_run.router)
+    app.include_router(ws_wizard.router)
+
+    return app
+
+
+# Module-level app instance for backward compatibility (uvicorn server:app)
+app = create_app()

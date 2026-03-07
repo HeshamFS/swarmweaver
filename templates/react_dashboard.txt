@@ -1,0 +1,58 @@
+React Admin Dashboard
+======================
+
+Build a data visualization dashboard with the following:
+
+## Tech Stack
+- React 19 (Vite)
+- TypeScript
+- Tailwind CSS v4
+- Recharts for charts
+- TanStack Table for data tables
+
+## Layout
+- Collapsible sidebar navigation
+- Top header with search, notifications bell, user menu
+- Main content area with breadcrumbs
+- Fully responsive (sidebar collapses to hamburger on mobile)
+
+## Pages
+
+### Overview Dashboard
+- 4 stat cards (Total Users, Revenue, Orders, Growth %)
+- Line chart: Revenue over last 12 months
+- Bar chart: Orders by category
+- Pie chart: User distribution by plan
+- Recent orders table (5 rows)
+
+### Analytics
+- Date range picker
+- Multi-line chart: traffic sources over time
+- Stacked bar chart: conversions by channel
+- Metric comparison cards (vs previous period)
+
+### Users
+- Data table with sorting, filtering, pagination
+- Search by name/email
+- Status filter (active/inactive)
+- Bulk actions (activate, deactivate, export CSV)
+- User detail modal on row click
+
+### Products
+- Grid/list view toggle
+- Product cards with image, name, price, stock
+- Add/edit product form (modal)
+- Category filter sidebar
+
+### Settings
+- General settings form
+- Theme toggle (light/dark)
+- Notification preferences
+
+## Requirements
+- Dark mode with system preference detection
+- Skeleton loading states
+- Error boundaries with retry
+- Mock data via JSON files (no backend required)
+- Keyboard shortcuts (/ for search, Esc to close modals)
+- Accessible charts (screen reader descriptions)

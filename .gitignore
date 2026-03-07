@@ -1,0 +1,33 @@
+# Agent-generated output directories
+generations/
+
+# Log files
+logs/
+
+# Environment variables (contains secrets)
+.env
+
+# Python virtual environment
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+node_modules
+
+.next/
+.venv/
+
+# IDE / tooling
+.claude/
+.playwright-mcp/
+
+# Python test cache
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# SwarmWeaver runtime artifacts (when repo itself is a target project)
+.swarmweaver/
