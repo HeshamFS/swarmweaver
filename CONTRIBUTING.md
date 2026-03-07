@@ -6,7 +6,7 @@ Thank you for your interest in contributing! This guide covers everything you ne
 
 - **Prerequisites:** Python 3.11+, Node 20+, [uv](https://docs.astral.sh/uv/) (Python package manager), npm
 - **Context:** Read [AGENTS.md](AGENTS.md) for the codebase summary used by AI tools
-- **Reference:** Check the [docs/](docs/) directory for detailed documentation
+- **Reference:** Check [docs/](docs/) for detailed documentation (e.g. [docs/architecture.md](docs/architecture.md) for code layout)
 
 ## Ways to Contribute
 
@@ -119,5 +119,5 @@ Before opening a PR, confirm:
 ## Getting Help
 
 - Open a [GitHub Issue](https://github.com/HeshamFS/swarmweaver/issues) for bugs or feature requests
-- Check [docs/](docs/) for detailed reference documentation
+- Check [docs/](docs/) for detailed reference documentation (e.g. [docs/architecture.md](docs/architecture.md) for package structure)
 - See [AGENTS.md](AGENTS.md) for the codebase summary used by AI tools

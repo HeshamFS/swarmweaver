@@ -10,8 +10,8 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue?logo=python&logoColor=white "Python 3.11 or newer")](https://www.python.org/downloads/)
 [![Node 20+](https://img.shields.io/badge/node-20%2B-green?logo=node.js&logoColor=white "Node.js 20 or newer")](https://nodejs.org/)
 [![License MIT](https://img.shields.io/badge/license-MIT-green "MIT License")](LICENSE)
-[![CI](https://img.shields.io/github/actions/workflow/status/HeshamFS/swarmwaver/ci.yml?branch=main "Build status")](https://github.com/HeshamFS/swarmwaver/actions)
-[![Docker](https://img.shields.io/badge/docker-ready-blue?logo=docker&logoColor=white "Docker support")](https://github.com/HeshamFS/swarmwaver#docker)
+[![CI](https://img.shields.io/github/actions/workflow/status/HeshamFS/swarmweaver/ci.yml?branch=main "Build status")](https://github.com/HeshamFS/swarmweaver/actions)
+[![Docker](https://img.shields.io/badge/docker-ready-blue?logo=docker&logoColor=white "Docker support")](https://github.com/HeshamFS/swarmweaver#docker)
 
 Point it at a spec, a codebase, or a bug report — it works autonomously across unlimited sessions until the job is done. Built for long-running autonomous sessions with audit trails, approval gates, and cost controls.
 
@@ -200,7 +200,7 @@ flowchart TB
 
 ```bash
 # 1. Clone and install
-git clone https://github.com/HeshamFS/swarmwaver.git
+git clone https://github.com/HeshamFS/swarmweaver.git
 cd swarmweaver
 ./setup.sh                   # creates venv + installs Python deps (Unix/macOS)
 # On Windows: use "uv sync" and "npm install" instead
@@ -558,7 +558,7 @@ For production use, run SwarmWeaver as a server and connect clients via the API 
 
 ```bash
 # Full setup
-git clone https://github.com/HeshamFS/swarmwaver.git
+git clone https://github.com/HeshamFS/swarmweaver.git
 cd swarmweaver
 ./setup.sh              # installs uv + runs uv sync (Unix/macOS)
 # Windows: uv sync && npm install
@@ -586,8 +586,8 @@ npm --prefix frontend run build
 
 ## Getting Help
 
-- **GitHub Issues** — [Report bugs or request features](https://github.com/HeshamFS/swarmwaver/issues)
-- **GitHub Discussions** — [Ask questions and share ideas](https://github.com/HeshamFS/swarmwaver/discussions)
+- **GitHub Issues** — [Report bugs or request features](https://github.com/HeshamFS/swarmweaver/issues)
+- **GitHub Discussions** — [Ask questions and share ideas](https://github.com/HeshamFS/swarmweaver/discussions)
 - **Documentation** — See [Related Documentation](#related-documentation) below for detailed guides
 
 ## Related Documentation
@@ -596,7 +596,13 @@ npm --prefix frontend run build
 - [CHANGELOG.md](CHANGELOG.md) — Release history and notable changes
 - [CLAUDE.md](CLAUDE.md) — Detailed architecture reference for AI coding assistants
 - [AGENTS.md](AGENTS.md) — Concise agent context for AI tools
-- [docs/](docs/) — Additional reference documentation
+- **Documentation** — Extended reference in [docs/](docs/):
+  - [Overview](docs/overview.md) — Modes, phases, capabilities
+  - [Getting Started](docs/getting-started.md) — Installation, auth, first run
+  - [Architecture](docs/architecture.md) — Package map, execution flow, security
+  - [CLI Reference](docs/cli-reference.md) — Commands, flags, examples
+  - [Web UI](docs/web-ui.md) — Dashboard capabilities and layout
+  - [Configuration](docs/configuration.md) — Environment, config file, project artifacts
 
 ## Contributing
 
