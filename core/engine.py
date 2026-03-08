@@ -573,6 +573,10 @@ class Engine:
                         break
                     elif status == "error":
                         ctx.budget_tracker.record_error()
+                        # Auth errors are fatal — stop immediately
+                        if isinstance(response, str) and "Authentication failed" in response:
+                            self._stopped = True
+                            break
                         await asyncio.sleep(3)
                     elif status == "image_error":
                         # Clear session to force fresh start
@@ -795,6 +799,7 @@ class Engine:
                         block_type = type(block).__name__
                         if block_type == "TextBlock" and hasattr(block, "text"):
                             response_text += block.text
+
                         elif block_type == "ThinkingBlock" and hasattr(block, "thinking"):
                             thinking_text = getattr(block, "thinking", "")
                             if thinking_text and len(thinking_text) > 10:
@@ -875,6 +880,21 @@ class Engine:
                                 "id": tool_use_id,
                                 "tool": "",
                             })
+
+            # Detect authentication errors returned as text (not raised as exceptions)
+            if response_text and "authentication_error" in response_text:
+                auth_msg = "Authentication failed. "
+                if "expired" in response_text.lower():
+                    auth_msg += "OAuth token has expired — run 'claude setup-token' to refresh."
+                elif "invalid" in response_text.lower():
+                    auth_msg += "Invalid API key or OAuth token."
+                else:
+                    auth_msg += "Check your CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY."
+                await self.emit({
+                    "type": "session_error",
+                    "data": {"error": auth_msg},
+                })
+                return "error", auth_msg, session_id, usage
 
             return "continue", response_text, session_id, usage
 
