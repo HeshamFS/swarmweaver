@@ -355,7 +355,6 @@ DON'T GUESS - SEARCH! Web search is fast and free. Read docs before implementing
         _user = os.environ.get("USER") or os.environ.get("USERNAME") or "swarmweaver"
         _home = os.environ.get("HOME") or os.path.expanduser("~")
         options_kwargs["env"] = {
-            **os.environ,
             "USER": _user,
             "HOME": _home,
             "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING": "1"
@@ -503,7 +502,6 @@ def create_orchestrator_client(
         "thinking": {"type": "adaptive"},
         "effort": "high",
         "env": {
-            **os.environ,
             "USER": os.environ.get("USER") or os.environ.get("USERNAME") or "swarmweaver",
             "HOME": os.environ.get("HOME") or os.path.expanduser("~"),
         },

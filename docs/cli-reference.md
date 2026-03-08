@@ -22,7 +22,7 @@ swarmweaver feature     --project-dir DIR --description TEXT [--spec FILE]
 swarmweaver refactor    --project-dir DIR --goal TEXT
 swarmweaver fix         --project-dir DIR --issue TEXT
 swarmweaver evolve      --project-dir DIR --goal TEXT
-swarmweaver security    --project-dir DIR [--description TEXT]
+swarmweaver security    --project-dir DIR [--focus TEXT]
 ```
 
 ### Session Management

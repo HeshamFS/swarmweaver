@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 | Need | Command / Path |
 |------|----------------|
-| Install deps | `uv sync` |
+| Install deps | `pip install -e .` or `uv sync` |
 | Start dev stack | `npm run dev` |
 | Run a mode | `swarmweaver feature --project-dir ./app --description "..."` |
 | Auth | `.env` with `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` |
@@ -41,8 +41,9 @@ This is an **Autonomous Coding Agent** (SwarmWeaver) - a Python harness that use
 ## Commands
 
 ```bash
-# Install all deps + register `swarmweaver` CLI (recommended)
-uv sync
+# Install deps + register `swarmweaver` CLI
+pip install -e .          # globally available
+# or: uv sync            # installs inside .venv (use 'uv run swarmweaver' or activate .venv)
 
 # Start Web UI (frontend + backend)
 npm run dev
@@ -69,7 +70,7 @@ swarmweaver fix --project-dir ./existing_app --issue "Login fails with plus sign
 swarmweaver evolve --project-dir ./existing_app --goal "Add unit tests for 80% coverage"
 
 # Security: Scan and remediate vulnerabilities (human-in-the-loop)
-swarmweaver security --project-dir ./existing_app --description "Full security audit"
+swarmweaver security --project-dir ./existing_app --focus "Full security audit"
 
 # Worktree mode: Run in isolated git worktree (changes can be merged or discarded)
 swarmweaver feature --project-dir ./my_app --description "Add OAuth2" --worktree

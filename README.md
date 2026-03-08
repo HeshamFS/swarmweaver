@@ -221,15 +221,27 @@ Open [http://localhost:3000](http://localhost:3000). Use the Omnibar to pick a m
 ### Option 2: CLI
 
 ```bash
-# Install all deps and register the 'swarmweaver' command
-uv sync
+# Install with pip (globally available — recommended)
+pip install -e .
 
-# Run any mode
+# Now 'swarmweaver' works directly from any terminal
+swarmweaver --help
 swarmweaver greenfield --project-dir ./my_app --spec ./my_spec.txt
 swarmweaver feature   --project-dir ./my_app --description "Add OAuth2 login"
 swarmweaver fix       --project-dir ./my_app --issue "Login fails with plus in email"
 swarmweaver evolve    --project-dir ./my_app --goal "Add 80% unit test coverage"
-swarmweaver security  --project-dir ./my_app --description "Full security audit"
+swarmweaver security  --project-dir ./my_app --focus "Full security audit"
+```
+
+**Alternative with uv** (uses a managed venv):
+
+```bash
+uv sync                             # install inside .venv
+uv run swarmweaver --help           # run via uv
+# or activate the venv directly:
+source .venv/bin/activate           # Linux/macOS
+# .venv\Scripts\activate            # Windows
+swarmweaver --help
 ```
 
 ### Option 3: Docker
@@ -250,9 +262,16 @@ docker-compose up
 ### Installation
 
 ```bash
-uv sync                 # install all deps + register swarmweaver CLI
+# Option A: pip (globally available)
+pip install -e .        # install in editable mode — 'swarmweaver' available system-wide
+
+# Option B: uv (managed venv)
+uv sync                 # install inside .venv
+uv run swarmweaver      # run via uv, or activate .venv first
+
+# Verify installation
 swarmweaver --help      # list all commands
-python -m cli --help    # alternative invocation
+python -m cli --help    # alternative invocation (no install needed)
 ```
 
 ### Commands
@@ -264,7 +283,7 @@ swarmweaver feature     --project-dir DIR --description TEXT [--spec FILE]
 swarmweaver refactor    --project-dir DIR --goal TEXT
 swarmweaver fix         --project-dir DIR --issue TEXT
 swarmweaver evolve      --project-dir DIR --goal TEXT
-swarmweaver security    --project-dir DIR [--description TEXT]
+swarmweaver security    --project-dir DIR [--focus TEXT]
 
 # Session management
 swarmweaver status      --project-dir DIR          # show task list and current phase

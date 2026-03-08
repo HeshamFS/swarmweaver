@@ -32,15 +32,20 @@ Open [http://localhost:3000](http://localhost:3000). Use the Omnibar to pick a m
 ### Option 2: CLI Only
 
 ```bash
-# Install all deps and register the 'swarmweaver' command
+# Install with pip (globally available — recommended)
+pip install -e .
+
+# Or with uv (uses a managed .venv)
 uv sync
+uv run swarmweaver --help           # run via uv
+# or: source .venv/bin/activate     # then swarmweaver works directly
 
 # Run any mode (after configuring auth)
 swarmweaver greenfield --project-dir ./my_app --spec ./my_spec.txt
 swarmweaver feature   --project-dir ./my_app --description "Add OAuth2 login"
 swarmweaver fix       --project-dir ./my_app --issue "Login fails with plus in email"
 swarmweaver evolve    --project-dir ./my_app --goal "Add 80% unit test coverage"
-swarmweaver security  --project-dir ./my_app --description "Full security audit"
+swarmweaver security  --project-dir ./my_app --focus "Full security audit"
 ```
 
 ### Option 3: Docker

@@ -166,6 +166,13 @@ class TaskList:
             print(f"Warning: Could not load {path}: {e}")
             return False
 
+    def to_dict(self) -> dict:
+        """Convert task list to a dict suitable for JSON serialization and WebSocket events."""
+        return {
+            "metadata": self.metadata,
+            "tasks": [t.to_dict() for t in self.tasks],
+        }
+
     def save(self):
         """Save tasks to disk in the new format."""
         self.metadata["updated_at"] = datetime.now().isoformat()

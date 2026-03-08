@@ -36,8 +36,18 @@ echo "=================================="
 echo "  Setup Complete!"
 echo "=================================="
 echo
-echo "To run the agent:"
-echo "  uv run swarmweaver --help"
+echo "To run the agent (pick one):"
+echo
+echo "  Option A — via uv (uses .venv):"
+echo "    uv run swarmweaver --help"
+echo
+echo "  Option B — activate the venv directly:"
+echo "    source .venv/bin/activate"
+echo "    swarmweaver --help"
+echo
+echo "  Option C — install globally with pip:"
+echo "    pip install -e ."
+echo "    swarmweaver --help"
 echo
 echo "Or start the full dev stack (backend + frontend):"
 echo "  npm run dev"

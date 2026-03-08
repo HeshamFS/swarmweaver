@@ -17,6 +17,12 @@ from core.models import DEFAULT_MODEL, ORCHESTRATOR_MODEL
 # Load environment variables from .env file
 load_dotenv()
 
+# Strip CLAUDECODE env var so the Claude Agent SDK can launch even when
+# invoked from within a Claude Code session (prevents "nested session" error).
+# The SDK's SubprocessCLITransport merges os.environ into the subprocess env,
+# so we must remove it from the process environment itself.
+os.environ.pop("CLAUDECODE", None)
+
 # Global state for interrupt handling
 _shutdown_requested = False
 
