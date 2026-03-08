@@ -53,8 +53,8 @@ class Task:
     """A single unit of work in the task list."""
     id: str
     title: str
-    description: str
-    category: str
+    description: str = ""
+    category: str = ""
     acceptance_criteria: list[str] = field(default_factory=list)
     status: str = TaskStatus.PENDING.value
     priority: int = 3  # 1 (highest) to 5 (lowest)
