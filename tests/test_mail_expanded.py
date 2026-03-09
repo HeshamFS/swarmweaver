@@ -650,14 +650,14 @@ class TestCLICommands:
 
 
 class TestMailInjectionHook:
-    @pytest.mark.asyncio
-    async def test_hook_returns_empty_without_store(self):
+    def test_hook_returns_empty_without_store(self):
+        import asyncio
         from hooks.main_hooks import mail_injection_hook
-        result = await mail_injection_hook({}, None, None)
+        result = asyncio.run(mail_injection_hook({}, None, None))
         assert result == {}
 
-    @pytest.mark.asyncio
-    async def test_hook_delivers_mail(self, tmp_store):
+    def test_hook_delivers_mail(self, tmp_store):
+        import asyncio
         from hooks.main_hooks import mail_injection_hook, set_mail_store, MAIL_INJECT_EVERY_N, _mail_inject_counter
 
         set_mail_store(tmp_store, "worker-1")
@@ -668,12 +668,12 @@ class TestMailInjectionHook:
         # Force counter to trigger on next call
         _mail_inject_counter.set(MAIL_INJECT_EVERY_N - 1)
 
-        result = await mail_injection_hook({}, None, None)
+        result = asyncio.run(mail_injection_hook({}, None, None))
         assert "message" in result
         assert "Test delivery" in result["message"]
 
-    @pytest.mark.asyncio
-    async def test_hook_throttles(self, tmp_store):
+    def test_hook_throttles(self, tmp_store):
+        import asyncio
         from hooks.main_hooks import mail_injection_hook, set_mail_store, _mail_inject_counter
 
         set_mail_store(tmp_store, "worker-1")
@@ -681,5 +681,5 @@ class TestMailInjectionHook:
 
         # Reset counter to 0 — should NOT trigger (not at boundary)
         _mail_inject_counter.set(0)
-        result = await mail_injection_hook({}, None, None)
+        result = asyncio.run(mail_injection_hook({}, None, None))
         assert result == {}
