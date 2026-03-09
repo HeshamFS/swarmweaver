@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from services.watchdog import SwarmWatchdog, WorkerHealth, WorkerHealthStatus
+from services.watchdog import SwarmWatchdog, WorkerHealth, AgentState
 
 
 # ---------------------------------------------------------------------------
@@ -35,12 +35,12 @@ def test_report_output():
     assert wd.output_buffers[1][0] == "Line 1"
 
 
-def test_report_output_max_20():
-    """report_output keeps only last 20 lines."""
+def test_report_output_max_50():
+    """report_output keeps only last 50 lines."""
     wd = SwarmWatchdog()
-    for i in range(30):
+    for i in range(60):
         wd.report_output(1, f"Line {i}")
-    assert len(wd.output_buffers[1]) == 20
+    assert len(wd.output_buffers[1]) == 50
     assert wd.output_buffers[1][0] == "Line 10"  # First 10 dropped
 
 
@@ -59,14 +59,14 @@ def test_report_output_separate_workers():
 # ---------------------------------------------------------------------------
 
 def test_ai_triage_returns_dict():
-    """_ai_triage should return a dict with verdict, reasoning, recommended_action."""
+    """_ai_triage_heuristic should return a dict with verdict, reasoning, recommended_action."""
     wd = SwarmWatchdog()
     health = WorkerHealth(
         worker_id=1,
-        status=WorkerHealthStatus.STALLED,
+        status=AgentState.STALLED,
         last_output_time=time.time() - 100,
     )
-    result = wd._ai_triage(health)
+    result = wd._ai_triage_heuristic(health)
     assert isinstance(result, dict)
     assert "verdict" in result
     assert "reasoning" in result
@@ -78,10 +78,10 @@ def test_ai_triage_verdict_values():
     wd = SwarmWatchdog()
     health = WorkerHealth(
         worker_id=1,
-        status=WorkerHealthStatus.STALLED,
+        status=AgentState.STALLED,
         last_output_time=time.time() - 60,
     )
-    result = wd._ai_triage(health)
+    result = wd._ai_triage_heuristic(health)
     assert result["verdict"] in ("retry", "terminate", "extend", "escalate")
 
 
@@ -90,11 +90,11 @@ def test_ai_triage_short_stall_retries():
     wd = SwarmWatchdog()
     health = WorkerHealth(
         worker_id=1,
-        status=WorkerHealthStatus.STALLED,
+        status=AgentState.STALLED,
         last_output_time=time.time() - 120,  # 2 minutes
         escalation_level=0,
     )
-    result = wd._ai_triage(health)
+    result = wd._ai_triage_heuristic(health)
     assert result["verdict"] in ("retry", "extend")
 
 
@@ -103,12 +103,12 @@ def test_ai_triage_long_stall_terminates():
     wd = SwarmWatchdog()
     health = WorkerHealth(
         worker_id=1,
-        status=WorkerHealthStatus.STALLED,
+        status=AgentState.STALLED,
         last_output_time=time.time() - 700,  # >10 minutes
         escalation_level=2,
         warnings=["loop detected"],
     )
-    result = wd._ai_triage(health)
+    result = wd._ai_triage_heuristic(health)
     assert result["verdict"] in ("terminate", "escalate")
 
 
@@ -121,11 +121,11 @@ def test_ai_triage_with_recent_progress():
 
     health = WorkerHealth(
         worker_id=1,
-        status=WorkerHealthStatus.STALLED,
+        status=AgentState.STALLED,
         last_output_time=time.time() - 200,  # 3.3 minutes
         escalation_level=0,
     )
-    result = wd._ai_triage(health)
+    result = wd._ai_triage_heuristic(health)
     # With recent progress, should lean toward extend
     assert result["verdict"] in ("extend", "retry")
 
@@ -135,13 +135,31 @@ def test_ai_triage_with_errors():
     wd = SwarmWatchdog()
     health = WorkerHealth(
         worker_id=1,
-        status=WorkerHealthStatus.STALLED,
+        status=AgentState.STALLED,
         last_output_time=time.time() - 400,
         escalation_level=2,
         warnings=["error detected", "repeated error"],
     )
+    result = wd._ai_triage_heuristic(health)
+    assert result["verdict"] in ("escalate", "terminate", "reassign")
+
+
+# ---------------------------------------------------------------------------
+# Backward compat: _ai_triage alias
+# ---------------------------------------------------------------------------
+
+def test_ai_triage_alias():
+    """_ai_triage should exist as alias for backward compatibility."""
+    wd = SwarmWatchdog()
+    assert hasattr(wd, "_ai_triage")
+    health = WorkerHealth(
+        worker_id=1,
+        status=AgentState.STALLED,
+        last_output_time=time.time() - 100,
+    )
     result = wd._ai_triage(health)
-    assert result["verdict"] in ("escalate", "terminate")
+    assert isinstance(result, dict)
+    assert "verdict" in result
 
 
 # ---------------------------------------------------------------------------
