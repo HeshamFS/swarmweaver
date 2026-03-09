@@ -53,9 +53,10 @@
 
 - Six operation modes: greenfield, feature, refactor, fix, evolve, security
 - Git worktree isolation (merge or discard on completion)
-- Multi-agent swarm (static N or AI-orchestrated Smart Swarm)
+- Multi-agent swarm (static N or AI-orchestrated Smart Swarm) with inter-agent mail coordination
 - Approval gates, verification loop, security allowlist
 - Cross-project memory, budget tracking, cost analysis
+- Inter-agent mail system: typed payloads, context injection, attachments, dead letter queue, analytics (`swarmweaver mail` CLI)
 - User-configurable MCP servers (global + per-project) with built-in puppeteer and web search
 - Chat wizard flow with streaming (QA, architect, plan, security review)
 - 4-tier merge conflict resolution for swarm

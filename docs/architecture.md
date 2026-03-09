@@ -39,7 +39,7 @@ swarmweaver/
 ├── hooks/                       # Policy enforcement hooks
 │   ├── security.py                # Bash command allowlist (~60+ commands)
 │   ├── capability_hooks.py        # Role-based capability enforcement
-│   ├── main_hooks.py              # Server/env/file mgmt, steering, audit
+│   ├── main_hooks.py              # Server/env/file mgmt, steering, audit, mail injection
 │   └── marathon_hooks.py         # Auto-commit, health, loop detection
 │
 ├── state/                       # Persistence layer
@@ -47,7 +47,7 @@ swarmweaver/
 │   ├── session_state.py           # Session ID tracking and resumption
 │   ├── checkpoints.py             # File state checkpoints for rollback
 │   ├── budget.py                  # Cost tracking and circuit breakers
-│   ├── mail.py                    # Inter-agent MailStore (SQLite)
+│   ├── mail.py                    # Inter-agent MailStore (SQLite; typed payloads, attachments, analytics)
 │   └── events.py                  # EventStore (SQLite)
 │
 ├── features/                    # Mode capabilities
@@ -134,6 +134,22 @@ flowchart TB
 ```
 
 For swarm modes, workers run in isolated git worktrees. When workers complete, their branches are merged via the merge queue. Conflicts are resolved through a 4-tier process: clean merge → auto-resolve → AI semantic merge → reimagine.
+
+### Inter-Agent Mail System
+
+Swarm workers and orchestrators coordinate through an SQLite-backed mail system (`state/mail.py`):
+
+- **15 message types** (dispatch, worker_done, worker_progress, error, escalation, merged, etc.) with 4 priority levels
+- **Typed protocol payloads** with schema validation per message type
+- **Context injection** — unread mail is formatted and injected into agent prompts via `mail_injection_hook` (PostToolUse)
+- **Reply auto-routing** and threaded conversations with summarization for long threads
+- **Priority escalation** — urgent (5 min) and high (15 min) messages get automatic reminders
+- **Dead letter queue** with rate limiting (20 msgs/min for low/normal priority)
+- **WebSocket push** — `on_send` callback fires `mail_received` events for real-time UI updates
+- **Message attachments** (file_diff, code_snippet, task_list, error_trace) with 5KB size limit
+- **Analytics** — top senders, unread bottlenecks, avg response time, dead letter count
+- **CLI**: `swarmweaver mail list|send|read|thread|stats|purge`
+- **API**: `GET /api/swarm/mail/analytics`
 
 ## Security Model
 

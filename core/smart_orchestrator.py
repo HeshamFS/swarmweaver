@@ -357,6 +357,15 @@ class SmartOrchestrator:
             })
 
             self._mail.initialize()
+            # Wire WebSocket push for mail events (M2-1)
+            def _mail_push(msg):
+                import asyncio as _aio
+                try:
+                    loop = _aio.get_running_loop()
+                    loop.create_task(self.emit({"type": "mail_received", "data": msg.to_dict()}))
+                except RuntimeError:
+                    pass
+            self._mail.on_send = _mail_push
             # Clear any stale messages from previous runs
             self._mail.mark_all_read("orchestrator")
             print(f"[ORCHESTRATOR] Cleared stale mail. Start time: {self._start_time}", flush=True)
@@ -1242,6 +1251,22 @@ class SmartOrchestrator:
         })
         self._record_decision(f"Spawned {name} with tasks {task_ids} and scope {file_scope}")
 
+        # Send DISPATCH beacon (M3-2) — worker's first context injection will surface this
+        try:
+            self._mail.send_protocol(
+                sender="orchestrator",
+                recipient=name,
+                msg_type=MessageType.DISPATCH.value,
+                subject=f"Assignment: {', '.join(task_ids[:5])}{'...' if len(task_ids) > 5 else ''}",
+                body=(f"You are {name} ({role}). Tasks: {task_ids}\n"
+                      f"File scope: {file_scope}\nUse get_my_tasks for details."),
+                priority="high",
+                payload={"task_ids": task_ids, "file_scope": file_scope,
+                         "worktree_path": str(worktree_path), "role": role},
+            )
+        except Exception:
+            pass
+
         return {
             "success": True,
             "worker_id": worker_id,
@@ -1545,6 +1570,10 @@ class SmartOrchestrator:
                 subject="Orchestrator directive",
                 body=message,
             )
+            # Also inject any pending worker mail via steering (M1-2)
+            worker_mail = self._mail.format_for_injection(handle.name, max_messages=5)
+            if worker_mail:
+                write_steering_message(Path(handle.worktree_path), worker_mail, "mail")
             # Interrupt the worker so it finishes its current turn and
             # reads the new directive at the start of the next turn.
             asyncio.create_task(handle.engine.send_interrupt())
@@ -2058,29 +2087,12 @@ spawn new workers for remaining tasks, and call signal_complete when all done.""
                 w.completed_at = datetime.utcnow().isoformat() + "Z"
 
     def _collect_updates(self) -> str:
-        """Read unread mail messages for orchestrator (only messages sent after startup)."""
-        messages = self._mail.get_messages(
-            recipient="orchestrator", unread_only=True, limit=50
-        )
-        if not messages:
+        """Read unread mail messages for orchestrator using format_for_injection."""
+        # Use format_for_injection for rich formatting (M1-2)
+        raw = self._mail.format_for_injection("orchestrator", max_messages=50)
+        if not raw:
             return ""
-        lines = []
-        for m in messages:
-            # Skip stale messages from before this orchestrator run started
-            if m.created_at < self._start_time:
-                self._mail.mark_read(m.id)
-                continue
-            self._mail.mark_read(m.id)
-            # Include worker status context
-            worker_status = ""
-            for w in self._workers.values():
-                if w.name == m.sender:
-                    worker_status = f" [worker status: {w.status}]"
-                    break
-            lines.append(f"[{m.created_at}] {m.sender}{worker_status} ({m.msg_type}): {m.subject}")
-            if m.body:
-                lines.append(f"  {m.body[:200]}")
-        return "\n".join(lines)
+        return raw
 
     def _any_workers_finished(self) -> bool:
         return any(

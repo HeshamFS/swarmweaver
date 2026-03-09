@@ -29,6 +29,8 @@ from hooks.main_hooks import (
     stop_hook,
     pre_compact_hook,
     subagent_stop_hook,
+    # Mail injection
+    mail_injection_hook,
     # Configuration functions
     set_audit_log_path,
     set_transcript_archive_path,
@@ -36,4 +38,5 @@ from hooks.main_hooks import (
     set_project_dir,
     set_cleanup_on_stop,
     set_notification_callback,
+    set_mail_store,
 )

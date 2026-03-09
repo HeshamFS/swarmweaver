@@ -143,6 +143,27 @@ swarmweaver feature --project-dir ./my_app --description "Add dashboard" --paral
 swarmweaver feature --project-dir ./my_app --description "Add dashboard" --smart-swarm
 ```
 
+### Inter-Agent Mail
+
+Inspect and manage the inter-agent mail system used for swarm coordination. Messages are stored in `.swarmweaver/mail.db`.
+
+```bash
+swarmweaver mail list    -p DIR                   # list all messages (newest first)
+swarmweaver mail list    -p DIR --unread           # only unread messages
+swarmweaver mail list    -p DIR -r worker-1        # filter by recipient
+swarmweaver mail list    -p DIR -t dispatch         # filter by message type
+swarmweaver mail send    -p DIR --to worker-1 --subject "New task" --body "Handle API" --type dispatch --priority high
+swarmweaver mail read    -p DIR MSG_ID              # mark single message as read
+swarmweaver mail read    -p DIR --all worker-1      # mark all messages read for a recipient
+swarmweaver mail thread  -p DIR THREAD_ID           # show conversation thread chronologically
+swarmweaver mail stats   -p DIR                     # analytics: totals, top senders, unread bottlenecks, response times
+swarmweaver mail purge   -p DIR --days 7 --yes      # delete read messages older than 7 days
+```
+
+Message types: `dispatch`, `worker_done`, `worker_progress`, `error`, `escalation`, `merged`, `merge_failed`, `directive`, `status`, `task_reassigned`, `assign`, `log`, `heartbeat`, `query`, `response`.
+
+Priority levels: `low`, `normal`, `high`, `urgent`.
+
 ## Legacy Invocation
 
 For backward compatibility:

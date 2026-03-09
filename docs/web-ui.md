@@ -53,7 +53,9 @@ Pause the agent for human review at key checkpoints. Approve or reject tasks bef
 When using `--parallel` or `--smart-swarm`, the Swarm panel provides:
 
 - Per-worker controls
-- Mail threads between agents
+- Mail threads between agents with attachments (code snippets, diffs, error traces)
+- Mail analytics mini-dashboard (total/unread counts, average response time, dead letters, top senders)
+- Real-time mail push via WebSocket (`mail_received` events) — instant updates without polling
 - Merge queue status
 - Nudge and terminate buttons
 

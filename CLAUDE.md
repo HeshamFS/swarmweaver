@@ -158,7 +158,7 @@ swarmweaver/                  # Project root (SwarmWeaver)
 │   ├── process_registry.py       # Background process tracking (PID, port, type)
 │   ├── agent_identity.py         # Agent identity store (name, role, success rate, CV)
 │   ├── budget.py                 # Cost tracking and circuit breakers
-│   ├── mail.py                   # Inter-agent MailStore (SQLite; swarm coordination)
+│   ├── mail.py                   # Inter-agent MailStore (SQLite; typed payloads, attachments, analytics, dead letters)
 │   └── events.py                 # EventStore (SQLite; tool calls, sessions, errors)
 ├── features/                   # Steering, approval, GitHub, memory, plugins, spec workflow
 │   ├── steering.py               # Interactive mid-session steering
@@ -279,6 +279,7 @@ Decision logic in `main()` and server: `smart_swarm` → SmartSwarm; `parallel >
 | `services/transcript_costs.py` | Transcript-based cost analysis: per-agent, per-model, with cache pricing |
 | `services/insights.py` | Session insight analyzer: top tools, hot files, error frequency |
 | `services/mcp_manager.py` | MCP server config store: two-level merge, CRUD, validate, test, import/export |
+| `state/mail.py` | Inter-agent MailStore: typed payloads, context injection, attachments, dead letters, rate limiting, analytics |
 | `web_search_server.py` | MCP server that wraps Claude's web search tool for agent use |
 
 ### Two-Layer Agent System
@@ -386,7 +387,7 @@ Key endpoint categories:
 | Spec | `GET/POST /api/spec`, `GET/POST /api/specs/{task_id}` |
 | Worktree | `POST /api/worktree/merge`, `POST /api/worktree/discard`, `GET /api/worktree/diff` |
 | Security | `GET /api/security-report`, `POST /api/security-report/approve` |
-| Swarm | `GET /api/swarm/status`, `GET /api/swarm/merge-queue`, `POST /api/swarm/workers/{id}/nudge`, `POST /api/swarm/workers/{id}/terminate` |
+| Swarm | `GET /api/swarm/status`, `GET /api/swarm/merge-queue`, `POST /api/swarm/workers/{id}/nudge`, `POST /api/swarm/workers/{id}/terminate`, `GET /api/swarm/mail/analytics` |
 | Budget | `GET /api/budget`, `POST /api/budget/update` |
 | Costs | `GET /api/costs`, `GET /api/costs/by-agent`, `GET /api/costs/by-model` |
 | Checkpoints | `GET /api/checkpoints`, `POST /api/checkpoints/restore` |
@@ -440,7 +441,7 @@ All SwarmWeaver artifacts are consolidated under `.swarmweaver/` — delete it a
 │   ├── runs/                        # Run history
 │   ├── chains/                      # Session chain data
 │   ├── mcp_servers.json              # Project-level MCP server config (merged with global)
-│   ├── mail.db                      # Inter-agent messaging
+│   ├── mail.db                      # Inter-agent mail (typed payloads, attachments, dead letters, analytics)
 │   └── events.db                    # Structured event store
 ├── init.sh                        # Environment setup script (greenfield, stays at root)
 └── docs/adr/                      # Architecture Decision Records (stays at root)
@@ -461,6 +462,7 @@ The system includes **fully autonomous** hooks that make decisions automatically
 | `file_management_hook` | **Auto-redirects** test/debug scripts to `scripts/`, session notes to `docs/` |
 | `port_config_hook` | **Auto-replaces** hardcoded zombie ports (8002) with configured backend port |
 | `knowledge_injection_hook` | **Auto-suggests** relevant docs when working on EU AI Act, A2A, errors |
+| `mail_injection_hook` | **Auto-injects** unread inter-agent mail into agent context (every 5 tool calls, PostToolUse) |
 | `log_consolidation_hook` | **Auto-redirects** log files to standard names (logs/backend.log, logs/frontend.log) |
 | `progress_file_management_hook` | **Auto-warns** when progress file exceeds 2000 lines, suggests archiving |
 | `audit_log_hook` | **Auto-registers** background processes with PIDs and ports |

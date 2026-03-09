@@ -405,17 +405,24 @@ export function ExecutionView({ state }: ExecutionViewProps) {
     };
   }, [selectedWorkerId, workerDetailStates, workerCostsByName, costsByAgent, workerElapsed, effectiveTaskList, workerTokenMap]);
 
-  // Agent count (from latest swarm events)
+  // Agent count (from swarm events: worker_spawned, worker_heartbeat, swarm_status)
   const agentCount = useMemo(() => {
-    const healthEvents = events.filter((e) => e.type === "agent_health");
-    if (healthEvents.length === 0) return undefined;
-    const agentNames = new Set(
-      healthEvents.map((e) => (e.data.agent_name as string) || (e.data.worker_id as string))
-    );
-    return agentNames.size > 1 ? agentNames.size : undefined;
+    const spawnedWorkers = new Set<string>();
+    for (const e of events) {
+      if (e.type === "worker_spawned") {
+        const name = (e.data?.name as string) || (e.data?.worker_id as string);
+        if (name) spawnedWorkers.add(name);
+      } else if (e.type === "worker_heartbeat") {
+        const name = (e.data?.name as string) || (e.data?.worker_id as string);
+        if (name) spawnedWorkers.add(name);
+      }
+    }
+    // Include orchestrator itself if workers exist
+    return spawnedWorkers.size > 0 ? spawnedWorkers.size + 1 : undefined;
   }, [events]);
 
-  const isSwarmMode = (agentCount ?? 0) > 1;
+  // Detect swarm mode from swarm events OR agent count
+  const isSwarmMode = (agentCount ?? 0) > 1 || events.some((e) => e.type === "swarm_status");
 
   // Extended thinking state — active when thinking_delta/thinking_block arrives, cleared on next tool_start/text_delta
   const isThinking = useMemo(() => {

@@ -378,6 +378,13 @@ class MonitorDaemon:
                         "timestamp": summary.timestamp,
                     })
 
+                # Check mail escalations (M1-4)
+                if self._mail_store:
+                    try:
+                        self._mail_store.check_escalations()
+                    except Exception:
+                        pass
+
                 await asyncio.sleep(self.check_interval)
             except asyncio.CancelledError:
                 break

@@ -97,6 +97,7 @@ Each target project gets a `.swarmweaver/` directory with session state and arti
 | `steering_input.json` | Human-in-the-loop steering messages |
 | `approval_pending.json` | Task approval gate state |
 | `mcp_servers.json` | Project-level MCP server config (merged with global) |
+| `mail.db` | Inter-agent mail database (SQLite WAL mode) |
 
 Delete `.swarmweaver/` to reset a project; SwarmWeaver will recreate it on the next run.
 

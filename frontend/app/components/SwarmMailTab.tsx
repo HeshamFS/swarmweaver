@@ -1,4 +1,10 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+
+interface MailAttachment {
+  type: string;
+  name: string;
+  content: string;
+}
 
 interface MailMessage {
   id: string;
@@ -11,12 +17,24 @@ interface MailMessage {
   read: boolean;
   created_at: string;
   thread_id?: string;
+  payload?: Record<string, unknown>;
+  attachments?: MailAttachment[];
+}
+
+interface MailAnalytics {
+  total?: number;
+  unread?: number;
+  top_senders?: Record<string, number>;
+  unread_by_recipient?: Record<string, number>;
+  avg_response_time_seconds?: number | null;
+  dead_letter_count?: number;
 }
 
 export interface SwarmMailTabProps {
   mailMessages: MailMessage[];
   mailStats: { total: number; unread: number };
   markMailRead: () => void;
+  projectDir?: string;
 }
 
 const MSG_TYPE_ICONS: Record<string, string> = {
@@ -63,9 +81,30 @@ export function SwarmMailTab({
   mailMessages,
   mailStats,
   markMailRead,
+  projectDir,
 }: SwarmMailTabProps) {
   const [expandedThreads, setExpandedThreads] = useState<Set<string>>(new Set());
   const [typeFilter, setTypeFilter] = useState<string>("");
+  const [analytics, setAnalytics] = useState<MailAnalytics | null>(null);
+
+  // Fetch analytics on mount + 30s poll
+  useEffect(() => {
+    if (!projectDir) return;
+    const fetchAnalytics = async () => {
+      try {
+        const res = await fetch(
+          `/api/swarm/mail/analytics?path=${encodeURIComponent(projectDir)}`
+        );
+        const data = await res.json();
+        setAnalytics(data.analytics || null);
+      } catch {
+        // Ignore
+      }
+    };
+    fetchAnalytics();
+    const interval = setInterval(fetchAnalytics, 30000);
+    return () => clearInterval(interval);
+  }, [projectDir]);
 
   // Filter messages by type
   const filteredMessages = typeFilter
@@ -81,8 +120,30 @@ export function SwarmMailTab({
   }
   const threadEntries = Array.from(threads.entries());
 
+  const formatResponseTime = (seconds: number | null | undefined) => {
+    if (seconds == null) return "N/A";
+    if (seconds < 60) return `${Math.round(seconds)}s`;
+    return `${Math.round(seconds / 60)}m`;
+  };
+
   return (
     <div className="flex flex-col">
+      {/* Analytics mini-dashboard (M2-4) */}
+      {analytics && (
+        <div className="px-3 py-2 border-b border-border-subtle bg-surface-raised/30 flex items-center gap-4 text-[10px] font-mono text-text-muted">
+          <span>{analytics.total ?? 0} total</span>
+          <span>{analytics.unread ?? 0} unread</span>
+          <span>Avg resp: {formatResponseTime(analytics.avg_response_time_seconds)}</span>
+          {(analytics.dead_letter_count ?? 0) > 0 && (
+            <span className="text-warning">{analytics.dead_letter_count} dead letters</span>
+          )}
+          {analytics.top_senders && Object.keys(analytics.top_senders).length > 0 && (
+            <span className="ml-auto truncate max-w-[200px]" title={Object.entries(analytics.top_senders).map(([k, v]) => `${k}: ${v}`).join(", ")}>
+              Top: {Object.entries(analytics.top_senders).slice(0, 2).map(([k, v]) => `${k}(${v})`).join(", ")}
+            </span>
+          )}
+        </div>
+      )}
       {/* Filter bar */}
       <div className="px-3 py-2 border-b border-border-subtle flex items-center gap-2">
         <select
@@ -205,6 +266,20 @@ export function SwarmMailTab({
                     {msg.body && (
                       <div className="text-[10px] text-text-muted font-mono whitespace-pre-wrap">
                         {msg.body}
+                      </div>
+                    )}
+                    {msg.attachments && msg.attachments.length > 0 && (
+                      <div className="mt-1 space-y-1">
+                        {msg.attachments.map((att, i) => (
+                          <details key={i} className="border border-border-subtle rounded">
+                            <summary className="text-[10px] px-2 py-0.5 cursor-pointer text-text-secondary">
+                              {att.type}: {att.name}
+                            </summary>
+                            <pre className="text-[9px] p-2 overflow-x-auto bg-surface font-mono max-h-40">
+                              {att.content}
+                            </pre>
+                          </details>
+                        ))}
                       </div>
                     )}
                   </div>

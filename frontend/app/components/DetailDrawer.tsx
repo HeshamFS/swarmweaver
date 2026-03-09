@@ -13,6 +13,7 @@ import type {
 import { DrawerSection } from "./drawer/DrawerSection";
 import { TaskGraph } from "./TaskGraph";
 import { MemoryPanel } from "./MemoryPanel";
+import { SwarmPanel } from "./SwarmPanel";
 
 export interface DetailDrawerProps {
   isOpen: boolean;
@@ -133,21 +134,30 @@ export function DetailDrawer({
 }: DetailDrawerProps) {
   const drawerRef = useRef<HTMLDivElement>(null);
 
-  // REST API polling for enriched data
-  const { data: budgetData } = useApiPoll("budget", projectPath, isOpen, 8000);
-  const { data: costsData } = useApiPoll("costs", projectPath, isOpen, 15000);
-  const { data: costsByModel } = useApiPoll("costs/by-model", projectPath, isOpen, 15000);
-  // Checkpoints = git commit history (session-history endpoint)
-  const { data: checkpointsData } = useApiPoll("session-history", projectPath, isOpen, 15000);
-  const { data: insightsData } = useApiPoll("insights", projectPath, isOpen, 12000);
-  const { data: timelineData } = useApiPoll("timeline", projectPath, isOpen, 8000);
-  const { data: processesData } = useApiPoll("processes", projectPath, isOpen, 10000);
-  const { data: sessionStatsApi } = useApiPoll("session-stats", projectPath, isOpen, 10000);
-  const { data: agentsData } = useApiPoll("agents", projectPath, isOpen, 15000);
-  const { data: reflectionsData } = useApiPoll("reflections", projectPath, isOpen, 20000);
-  const { data: auditTimelineData } = useApiPoll("audit-timeline", projectPath, isOpen, 12000);
-  const { data: sessionChainData } = useApiPoll("session/chain", projectPath, isOpen, 12000);
-  const { data: swarmMailData } = useApiPoll("swarm/mail", projectPath, isOpen && isSwarmMode, 15000);
+  // Tab state — declared early so polling can be tab-conditional
+  const [activeDrawerTab, setActiveDrawerTab] = useState<"tasks" | "observe" | "memory" | "docs" | "swarm">("tasks");
+
+  // REST API polling — only poll endpoints relevant to the active tab
+  const isObserveTab = isOpen && activeDrawerTab === "observe";
+  const isDocsTab = isOpen && activeDrawerTab === "docs";
+  const isMemoryTab = isOpen && activeDrawerTab === "memory";
+
+  // Budget is shared (status strip uses it) — poll always when open
+  const { data: budgetData } = useApiPoll("budget", projectPath, isOpen, 15000);
+  // Observe tab polls
+  const { data: costsData } = useApiPoll("costs", projectPath, isObserveTab, 15000);
+  const { data: costsByModel } = useApiPoll("costs/by-model", projectPath, isObserveTab, 15000);
+  const { data: insightsData } = useApiPoll("insights", projectPath, isObserveTab, 15000);
+  const { data: timelineData } = useApiPoll("timeline", projectPath, isObserveTab, 10000);
+  const { data: processesData } = useApiPoll("processes", projectPath, isObserveTab, 15000);
+  const { data: sessionStatsApi } = useApiPoll("session-stats", projectPath, isObserveTab, 15000);
+  const { data: agentsData } = useApiPoll("agents", projectPath, isObserveTab, 15000);
+  const { data: auditTimelineData } = useApiPoll("audit-timeline", projectPath, isObserveTab, 15000);
+  // Docs tab polls
+  const { data: checkpointsData } = useApiPoll("session-history", projectPath, isDocsTab, 15000);
+  const { data: sessionChainData } = useApiPoll("session/chain", projectPath, isDocsTab, 15000);
+  // Memory tab polls
+  const { data: reflectionsData } = useApiPoll("reflections", projectPath, isMemoryTab, 20000);
 
   // Worktree diff (only when worktree exists)
   const [worktreeDiffData, setWorktreeDiffData] = useState<{ diff: string; status?: { files_changed?: number } } | null>(null);
@@ -189,7 +199,6 @@ export function DetailDrawer({
     mail: "swarm",
     merges: "swarm",
   };
-  const [activeDrawerTab, setActiveDrawerTab] = useState<"tasks" | "observe" | "memory" | "docs" | "swarm">("tasks");
   useEffect(() => {
     if (activeSection && sectionToTab[activeSection]) {
       setActiveDrawerTab(sectionToTab[activeSection]);
@@ -389,25 +398,6 @@ export function DetailDrawer({
 
   const agentHealthEvents = useMemo(
     () => events.filter((e) => e.type === "agent_health"),
-    [events]
-  );
-
-  const dispatchEvents = useMemo(
-    () => events.filter((e) =>
-      e.type === "dispatch" ||
-      e.type === "escalation" ||
-      e.type === "swarm_dispatch" ||
-      e.type === "worker_message"
-    ),
-    [events]
-  );
-
-  const mergeEvents = useMemo(
-    () => events.filter((e) =>
-      e.type === "merge" ||
-      e.type === "swarm_merge" ||
-      e.type === "merge_complete"
-    ),
     [events]
   );
 
@@ -705,38 +695,10 @@ export function DetailDrawer({
                       );
                     })}
                   </div>
-                ) : isSwarmMode && asArr(swarmMailData?.messages).length > 0 ? (
-                  <div className="space-y-2">
-                    <h4 className="text-[10px] font-mono text-[#555] uppercase tracking-wider mb-1">Swarm Mail</h4>
-                    {asArr(swarmMailData?.messages).slice(0, 8).map((msg: ApiData, i: number) => (
-                      <div key={asStr(msg.id) || i} className="p-2 bg-[#121212] border border-[#222] text-[10px] font-mono">
-                        <div className="flex items-center gap-2 text-[#888]">
-                          <span>{asStr(msg.sender, "?")}</span>
-                          <span>→</span>
-                          <span>{asStr(msg.recipient, "?")}</span>
-                          {!!msg.msg_type && <span className="text-[var(--color-accent)]">[{asStr(msg.msg_type)}]</span>}
-                        </div>
-                        <p className="text-[#888] mt-0.5 truncate">{asStr(msg.body ?? msg.content ?? msg.message).slice(0, 80)}</p>
-                      </div>
-                    ))}
-                  </div>
+                ) : isSwarmMode ? (
+                  <p className="text-xs font-mono text-[#555]">See the Swarm tab for worker details and mail</p>
                 ) : (
                   <p className="text-xs font-mono text-[#555]">No agent data available</p>
-                )}
-                {isSwarmMode && asArr(swarmMailData?.messages).length > 0 && (asArr(agentsData?.agents).length > 0 || agentHealthEvents.length > 0) && (
-                  <div className="mt-3 pt-3 border-t border-[#222] space-y-2">
-                    <h4 className="text-[10px] font-mono text-[#555] uppercase tracking-wider mb-1">Swarm Mail</h4>
-                    {asArr(swarmMailData?.messages).slice(0, 5).map((msg: ApiData, i: number) => (
-                      <div key={`mail-${asStr(msg.id) || i}`} className="p-2 bg-[#121212] border border-[#222] text-[10px] font-mono">
-                        <div className="flex items-center gap-2 text-[#888]">
-                          <span>{asStr(msg.sender, "?")}</span>
-                          <span>→</span>
-                          <span>{asStr(msg.recipient, "?")}</span>
-                        </div>
-                        <p className="text-[#888] mt-0.5 truncate">{asStr(msg.body ?? msg.content ?? msg.message).slice(0, 60)}</p>
-                      </div>
-                    ))}
-                  </div>
                 )}
               </DrawerSection>
 
@@ -779,8 +741,9 @@ export function DetailDrawer({
                 ) : (
                   <div className="space-y-2 max-h-64 overflow-y-auto tui-scrollbar">
                     {errorEvents.map((evt, i) => {
-                      const severity = (evt.data.severity as string) || (evt.type === "blocked" ? "warning" : "error");
-                      const msg = (evt.data.message as string) || (evt.data.error as string) || (evt.data.reason as string) || (evt.data.feedback as string) || JSON.stringify(evt.data);
+                      const d = evt.data || {};
+                      const severity = (d.severity as string) || (evt.type === "blocked" ? "warning" : "error");
+                      const msg = (d.message as string) || (d.error as string) || (d.reason as string) || (d.feedback as string) || JSON.stringify(d);
                       return (
                         <div key={`${evt.timestamp}-${i}`} className="p-2 bg-[#121212] border border-[#222] border-l-2" style={{ borderLeftColor: SEVERITY_COLOR[severity] || SEVERITY_COLOR.error }}>
                           <div className="flex items-center gap-2 mb-1">
@@ -1086,78 +1049,10 @@ export function DetailDrawer({
 
               {/* ── Swarm tab (conditional) ── */}
               {activeDrawerTab === "swarm" && isSwarmMode && (
-              <>
-              <DrawerSection
-                  title="Swarm Mail"
-                  icon={<span className="text-xs font-mono">{"\u2709"}</span>}
-                  count={dispatchEvents.length}
-                  forceOpen={activeSection === "mail" ? true : undefined}
-                >
-                  {dispatchEvents.length === 0 ? (
-                    <p className="text-xs font-mono text-[#555]">No dispatch messages</p>
-                  ) : (
-                    <div className="space-y-1.5 max-h-64 overflow-y-auto tui-scrollbar">
-                      {dispatchEvents.slice(-20).map((evt, i) => {
-                        const d = evt.data as Record<string, unknown>;
-                        const from = (d.from as string) || (d.sender as string) || "system";
-                        const to = (d.to as string) || (d.recipient as string) || "all";
-                        const msg = (d.message as string) || (d.content as string) || JSON.stringify(d).slice(0, 120);
-                        return (
-                          <div key={`${evt.timestamp}-${i}`} className="p-2 bg-[#121212] border border-[#222]">
-                            <div className="flex items-center gap-1.5 mb-0.5">
-                              <span className="text-[10px] font-mono text-[var(--color-accent)]">{from}</span>
-                              <span className="text-[#555] text-xs">{"\u2192"}</span>
-                              <span className="text-[10px] font-mono text-[#888]">{to}</span>
-                              <span className="text-[10px] font-mono text-[#555] ml-auto">{formatTime(evt.timestamp)}</span>
-                            </div>
-                            <p className="text-xs font-mono text-[#888] break-words">{typeof msg === "string" ? msg.slice(0, 200) : String(msg).slice(0, 200)}</p>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </DrawerSection>
-
-              <DrawerSection
-                  title="Merge Queue"
-                  icon={<span className="text-xs font-mono">{"\u2387"}</span>}
-                  count={mergeEvents.length}
-                  forceOpen={activeSection === "merges" ? true : undefined}
-                >
-                  {mergeEvents.length === 0 ? (
-                    <p className="text-xs font-mono text-[#555]">No merge activity</p>
-                  ) : (
-                    <div className="space-y-1.5 max-h-64 overflow-y-auto tui-scrollbar">
-                      {mergeEvents.map((evt, i) => {
-                        const d = evt.data as Record<string, unknown>;
-                        const branch = (d.branch as string) || (d.source_branch as string) || "unknown";
-                        const mergeStatus = (d.status as string) || (d.result as string) || evt.type;
-                        const files = (d.files_changed as number) ?? (d.files as number) ?? 0;
-                        const statusColor =
-                          mergeStatus === "success" || mergeStatus === "merge_complete" ? "var(--color-success)" :
-                          mergeStatus === "conflict" ? "var(--color-error)" :
-                          mergeStatus === "pending" ? "var(--color-warning)" :
-                          "var(--color-text-muted)";
-                        return (
-                          <div key={`${evt.timestamp}-${i}`} className="flex items-start gap-2 p-2 bg-[#121212] border border-[#222]">
-                            <span className="w-2 h-2 mt-1 shrink-0" style={{ backgroundColor: statusColor }} />
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-xs font-mono text-[#E0E0E0] truncate">{branch}</span>
-                                <span className="text-[10px] font-mono text-[#555] ml-auto shrink-0">{formatTime(evt.timestamp)}</span>
-                              </div>
-                              <div className="flex items-center gap-2 mt-0.5">
-                                <span className="text-[10px]" style={{ color: statusColor }}>{mergeStatus}</span>
-                                {files > 0 && <span className="text-[10px] font-mono text-[#555]">{files} files</span>}
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </DrawerSection>
-              </>
+                <SwarmPanel
+                  projectDir={projectPath}
+                  output={output}
+                />
               )}
             </div>
           </motion.div>

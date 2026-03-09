@@ -271,6 +271,24 @@ class SwarmOrchestrator:
         for worker in self.workers:
             worker.file_scope = sorted(worker_files[worker.worker_id])
 
+        # Send DISPATCH mail for each worker assignment (M3-1)
+        for worker in self.workers:
+            wid = worker.worker_id
+            task_ids = assignments.get(wid, [])
+            if task_ids:
+                try:
+                    from state.mail import MessageType
+                    self.mail.send(
+                        sender="orchestrator",
+                        recipient=f"worker-{wid}",
+                        msg_type=MessageType.DISPATCH.value,
+                        subject=f"Worker {wid}: {len(task_ids)} tasks assigned",
+                        body=f"Tasks: {', '.join(task_ids)}",
+                        metadata={"task_ids": task_ids},
+                    )
+                except Exception:
+                    pass
+
         return assignments
 
     async def cleanup_worktrees(self) -> None:

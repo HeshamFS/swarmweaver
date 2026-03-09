@@ -39,10 +39,12 @@ from hooks import (
     write_before_read_hook,
     steering_hook,
     worker_scope_hook,
+    mail_injection_hook,
     set_audit_log_path,
     set_transcript_archive_path,
     set_project_dir,
     set_cleanup_on_stop,
+    set_mail_store,
 )
 from hooks.marathon_hooks import (
     configure_marathon,
@@ -230,6 +232,7 @@ def create_client(
         hooks["PostToolUse"].append(HookMatcher(hooks=[
             audit_log_hook,
             knowledge_injection_hook,
+            mail_injection_hook,
             # Marathon hooks for long-running sessions
             session_stats_hook,
             loop_detection_hook,
@@ -470,6 +473,9 @@ def create_orchestrator_client(
     except OSError as e:
         print(f"[WARNING] Failed to write orchestrator security settings: {e}", flush=True)
         settings_file = None
+
+    # Configure hook context so steering_hook can find the project dir
+    set_project_dir(project_dir)
 
     # Minimal hooks — only security + steering
     hooks = {

@@ -126,6 +126,24 @@ async def mark_mail_read(
         return {"status": "error", "message": str(e)}
 
 
+@router.get("/api/swarm/mail/analytics")
+async def get_mail_analytics(
+    path: str = Query(..., description="Project directory path"),
+):
+    """Get mail system analytics including response times and bottleneck detection."""
+    try:
+        from state.mail import MailStore
+        store = MailStore(Path(path))
+        if not store.db_path.exists():
+            return {"analytics": {}}
+        store.initialize()
+        analytics = store.get_analytics()
+        store.close()
+        return {"analytics": analytics}
+    except Exception as e:
+        return {"analytics": {}, "error": str(e)}
+
+
 @router.get("/api/swarm/health")
 async def get_swarm_health(
     path: str = Query(..., description="Project directory path"),

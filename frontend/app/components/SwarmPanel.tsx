@@ -105,11 +105,12 @@ interface SwarmPanelProps {
   projectDir: string;
   output: string[];
   triageResults?: Record<number, TriageResultEntry>;
+  mailVersion?: number;  // incremented on mail_received WS event for instant refresh
 }
 
 type SwarmTab = "workers" | "mail" | "merges";
 
-export function SwarmPanel({ projectDir, output, triageResults }: SwarmPanelProps) {
+export function SwarmPanel({ projectDir, output, triageResults, mailVersion }: SwarmPanelProps) {
   const [workers, setWorkers] = useState<WorkerState[]>([]);
   const [numWorkers, setNumWorkers] = useState(0);
   const [maxDepth, setMaxDepth] = useState(2);
@@ -133,7 +134,7 @@ export function SwarmPanel({ projectDir, output, triageResults }: SwarmPanelProp
       fetchMail();
       fetchHealth();
       fetchMergeQueue();
-    }, 3000);
+    }, 10000);
     fetchStatus();
     fetchMail();
     fetchHealth();
@@ -206,6 +207,11 @@ export function SwarmPanel({ projectDir, output, triageResults }: SwarmPanelProp
       // Ignore
     }
   };
+
+  // Instant mail refresh on WebSocket push (M2-1)
+  useEffect(() => {
+    if (mailVersion) fetchMail();
+  }, [mailVersion]);
 
   // Filter output by worker prefix [W1], [W2], etc.
   const getWorkerOutput = (workerId: number): string[] => {
@@ -410,6 +416,7 @@ export function SwarmPanel({ projectDir, output, triageResults }: SwarmPanelProp
             mailMessages={mailMessages}
             mailStats={mailStats}
             markMailRead={markMailRead}
+            projectDir={projectDir}
           />
         )}
 

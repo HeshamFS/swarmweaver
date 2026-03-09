@@ -7,7 +7,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30_000); // 30s
+    const timeout = setTimeout(() => controller.abort(), 120_000); // 120s (git ops on WSL can be slow)
 
     const res = await fetch(`${BACKEND_URL}/api/project/prepare`, {
       method: "POST",

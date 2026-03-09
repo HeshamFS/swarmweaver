@@ -329,6 +329,17 @@ class Engine:
                     )
                     self._current_client = client
 
+                    # Wire mail injection for swarm workers (M1-2)
+                    if self._mail_project_dir and self._worker_id:
+                        try:
+                            from hooks import set_mail_store
+                            from state.mail import MailStore
+                            _worker_mail_store = MailStore(self._mail_project_dir)
+                            _worker_mail_store.initialize()
+                            set_mail_store(_worker_mail_store, f"worker-{self._worker_id}")
+                        except Exception as _mail_err:
+                            print(f"[Engine] Mail injection setup failed: {_mail_err}", flush=True)
+
                     # Smart context priming
                     context_prime = ""
                     if looping:

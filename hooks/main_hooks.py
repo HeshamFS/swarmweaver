@@ -1389,6 +1389,81 @@ async def write_before_read_hook(
     return {}
 
 
+# ---------------------------------------------------------------------------
+# Mail injection hook (M1-2) — delivers unread mail to swarm workers
+# ---------------------------------------------------------------------------
+
+# Per-task mail store context (set by the engine for each worker)
+_mail_store_ctx: contextvars.ContextVar[Optional[Any]] = contextvars.ContextVar(
+    "swarmweaver_mail_store", default=None
+)
+_agent_name_ctx: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "swarmweaver_agent_name", default=None
+)
+# Module-level fallbacks
+_mail_store: Optional[Any] = None
+_agent_name: Optional[str] = None
+
+def set_mail_store(store, agent_name: str = "") -> None:
+    """Set the MailStore and agent name for the current async task.
+
+    Called by the engine/orchestrator before starting a worker so that
+    the mail_injection_hook can deliver messages.
+    """
+    global _mail_store, _agent_name
+    _mail_store = store
+    _agent_name = agent_name
+    _mail_store_ctx.set(store)
+    _agent_name_ctx.set(agent_name)
+
+
+def _get_mail_store():
+    return _mail_store_ctx.get(_mail_store)
+
+def _get_agent_name():
+    return _agent_name_ctx.get(_agent_name)
+
+
+# Throttle: inject at most once every N tool calls
+_mail_inject_counter: contextvars.ContextVar[int] = contextvars.ContextVar(
+    "swarmweaver_mail_inject_counter", default=0
+)
+MAIL_INJECT_EVERY_N = 5  # check for mail every 5 tool calls
+
+
+async def mail_injection_hook(
+    input_data: dict[str, Any],
+    tool_use_id: Optional[str],
+    context: Any,
+) -> dict[str, Any]:
+    """PostToolUse hook that injects unread mail into the agent's context.
+
+    Checks for unread messages for the current agent every N tool calls.
+    When mail is found, returns it as a hook message that the agent sees.
+    """
+    store = _get_mail_store()
+    name = _get_agent_name()
+    if not store or not name:
+        return {}
+
+    # Throttle: only check every N tool calls to avoid DB overhead
+    counter = _mail_inject_counter.get(0)
+    counter += 1
+    _mail_inject_counter.set(counter)
+    if counter % MAIL_INJECT_EVERY_N != 0:
+        return {}
+
+    try:
+        formatted = store.format_for_injection(name, max_messages=5)
+        if not formatted:
+            return {}
+        return {
+            "message": formatted,
+        }
+    except Exception:
+        return {}
+
+
 # Export all hooks for easy import
 __all__ = [
     # Security hook (re-exported)
@@ -1410,6 +1485,8 @@ __all__ = [
     "stop_hook",
     "pre_compact_hook",
     "subagent_stop_hook",
+    # Mail injection
+    "mail_injection_hook",
     # Configuration functions
     "set_audit_log_path",
     "set_transcript_archive_path",
@@ -1417,4 +1494,5 @@ __all__ = [
     "set_project_dir",
     "set_cleanup_on_stop",
     "set_notification_callback",
+    "set_mail_store",
 ]
