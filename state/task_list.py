@@ -313,6 +313,23 @@ class TaskList:
         return "\n".join(lines)
 
 
+def get_blocking_tasks(worker_task_ids: list[str], all_tasks: list) -> list[str]:
+    """Return task IDs that depend on the given worker's incomplete tasks.
+
+    If worker A has task T1 and worker B's task T2 depends_on T1,
+    then T1 is a "blocking task" — stalling worker A blocks worker B.
+    """
+    worker_set = set(worker_task_ids)
+    blocked_by = []
+    for task in all_tasks:
+        deps = getattr(task, "depends_on", []) or []
+        for dep_id in deps:
+            if dep_id in worker_set and task.id not in worker_set:
+                if dep_id not in blocked_by:
+                    blocked_by.append(dep_id)
+    return blocked_by
+
+
 def generate_task_id() -> str:
     """Generate a unique task ID."""
     return f"TASK-{uuid.uuid4().hex[:6].upper()}"

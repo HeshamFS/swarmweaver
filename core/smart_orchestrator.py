@@ -324,9 +324,36 @@ class SmartOrchestrator:
         except OSError:
             pass  # May already exist or be a ghost file — handled during spawn
 
+        # Enhanced watchdog (W4-4)
+        self._watchdog = None
+        self._watchdog_task: Optional[asyncio.Task] = None
+        try:
+            from services.watchdog import SwarmWatchdog, WatchdogConfig
+            watchdog_config = WatchdogConfig.load(self.project_dir)
+            if watchdog_config.enabled:
+                self._watchdog = SwarmWatchdog(
+                    config=watchdog_config,
+                    mail_store=self._mail,
+                    project_dir=self.project_dir,
+                    on_event=self._on_watchdog_event,
+                )
+        except Exception as e:
+            print(f"[ORCHESTRATOR] Watchdog init failed (non-fatal): {e}", flush=True)
+
     @staticmethod
     async def _noop(event: dict) -> None:
         pass
+
+    def _on_watchdog_event(self, event: dict) -> None:
+        """Forward watchdog events to the main on_event callback."""
+        import asyncio as _aio
+        try:
+            if "timestamp" not in event:
+                event["timestamp"] = datetime.utcnow().isoformat() + "Z"
+            loop = _aio.get_running_loop()
+            loop.create_task(self._on_event(event))
+        except RuntimeError:
+            pass
 
     async def emit(self, event: dict) -> None:
         if "timestamp" not in event:
@@ -369,6 +396,11 @@ class SmartOrchestrator:
             # Clear any stale messages from previous runs
             self._mail.mark_all_read("orchestrator")
             print(f"[ORCHESTRATOR] Cleared stale mail. Start time: {self._start_time}", flush=True)
+
+            # Start watchdog monitoring loop (W4-4)
+            if self._watchdog:
+                self._watchdog_task = asyncio.create_task(self._watchdog.run())
+                print("[ORCHESTRATOR] Watchdog monitoring started", flush=True)
 
             # Analyse tasks
             tl = TaskList(self.project_dir)
@@ -643,6 +675,14 @@ class SmartOrchestrator:
         if not task_ids:
             return {"success": False, "error": "No task_ids provided"}
 
+        # Enhanced watchdog circuit breaker check (W4-4)
+        if self._watchdog and self._watchdog.config.circuit_breaker_enabled:
+            can_spawn, cb_reason = self._watchdog.circuit_breaker.can_spawn()
+            if not can_spawn:
+                await self.emit({"type": "watchdog_circuit_breaker",
+                                 "data": self._watchdog.circuit_breaker.get_status()})
+                return {"success": False, "error": f"Circuit breaker: {cb_reason}"}
+
         # Circuit breaker: stop spawning after repeated failures
         if self._consecutive_spawn_failures >= self._max_consecutive_failures:
             return {
@@ -874,6 +914,16 @@ class SmartOrchestrator:
             await self.emit(event)
             etype = event.get("type", "")
             evdata = event.get("data", {}) if isinstance(event.get("data"), dict) else {}
+
+            # Report activity to watchdog (W4-4)
+            if self._watchdog:
+                self._watchdog.report_activity(worker_id)
+                if etype in ("output", "text_delta"):
+                    output_text = str(event.get("data", ""))
+                    self._watchdog.report_output(worker_id, output_text)
+                elif etype == "tool_start":
+                    tool_name = evdata.get("tool", "")
+                    self._watchdog.report_tool_activity(worker_id, tool_name)
 
             # ── Live activity tracking ──
             if etype == "tool_start":
@@ -1230,6 +1280,18 @@ class SmartOrchestrator:
             started_at=datetime.utcnow().isoformat() + "Z",
         )
         self._workers[worker_id] = handle
+
+        # Register worker with enhanced watchdog (W4-4)
+        if self._watchdog:
+            self._watchdog.register_worker(
+                worker_id=worker_id,
+                pid=None,  # PID set when engine starts
+                role=role,
+                worktree_path=str(worktree_path),
+                assigned_task_ids=task_ids,
+                file_scope=file_scope,
+                asyncio_task=atask,
+            )
 
         # Non-blocking overlap detection with non-running workers (merged/completed)
         # Running workers already blocked above; this warns about merge-time conflicts
@@ -2240,6 +2302,11 @@ spawn new workers for remaining tasks, and call signal_complete when all done.""
     async def stop(self) -> None:
         """Stop orchestrator and all workers."""
         self._stopped = True
+        # Stop watchdog
+        if self._watchdog:
+            self._watchdog.stop()
+        if self._watchdog_task and not self._watchdog_task.done():
+            self._watchdog_task.cancel()
         for handle in list(self._workers.values()):
             try:
                 await handle.engine.stop()

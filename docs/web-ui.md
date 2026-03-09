@@ -59,6 +59,21 @@ When using `--parallel` or `--smart-swarm`, the Swarm panel provides:
 - Merge queue status
 - Nudge and terminate buttons
 
+### Watchdog Health Tab
+
+The Swarm panel includes a **Health** tab (4th tab alongside Workers, Mail, Merges) with a dedicated watchdog dashboard:
+
+- **Fleet Health Score** — 0-100 score with color gradient (green >70, yellow 40-70, red <40) and progress bar
+- **Circuit Breaker Badge** — CLOSED (green), HALF_OPEN (yellow), OPEN (red)
+- **Worker State Cards** — Per-worker card showing: state badge (9 states with distinct colors, animated pulse for STALLED/RECOVERING), role, current task, last activity time, tasks completed, escalation level, nudge count
+- **Resource Bars** — Inline CPU% and Memory MB bars per worker (when available)
+- **Quick Actions** — Nudge button (with 30s cooldown timer) and Terminate button (with confirm dialog)
+- **Triage Cards** — When AI triage completes: verdict badge (RETRY/EXTEND/REASSIGN/TERMINATE), reasoning text, confidence bar (0-100%)
+- **Escalation Timeline** — Chronological event stream with color-coded event types (state changes, nudges, triage, terminations, run completion)
+- **Config Editor** — Collapsible form to view and edit all watchdog thresholds, with Save and Reset buttons
+
+Real-time updates via WebSocket events: `watchdog_state_change`, `watchdog_nudge`, `watchdog_triage`, `watchdog_circuit_breaker`, `run_complete`.
+
 ### Observability Panel
 
 Nine sub-tabs for deep inspection:

@@ -388,13 +388,80 @@ def force_commit() -> bool:
     return False
 
 
+# Heartbeat hook state
+_heartbeat_state = {
+    "last_heartbeat_time": None,
+    "tool_call_count": 0,
+}
+
+HEARTBEAT_INTERVAL_S = 60  # Send heartbeat every 60 seconds
+
+
+async def heartbeat_hook(
+    input_data: dict[str, Any],
+    tool_use_id: Optional[str],
+    context: Any
+) -> dict[str, Any]:
+    """
+    PostToolUse hook that sends heartbeat messages every 60s via mail.
+
+    Keeps the watchdog informed that the worker is alive even when
+    no stdout is being produced (e.g., during long LLM thinking phases).
+    """
+    _heartbeat_state["tool_call_count"] = _heartbeat_state.get("tool_call_count", 0) + 1
+    tool_count = _heartbeat_state["tool_call_count"]
+
+    now = datetime.now()
+    last_hb = _heartbeat_state.get("last_heartbeat_time")
+
+    # Only send heartbeat every HEARTBEAT_INTERVAL_S seconds
+    if last_hb and (now - last_hb).total_seconds() < HEARTBEAT_INTERVAL_S:
+        return {}
+
+    project_dir = _marathon_state.get("project_dir")
+    if not project_dir:
+        return {}
+
+    try:
+        from state.mail import MailStore
+
+        # Derive worker_id from environment or project context
+        worker_id = os.environ.get("SWARMWEAVER_WORKER_ID", "0")
+
+        tool_name = input_data.get("tool_name", "")
+
+        store = MailStore(project_dir)
+        if store.db_path.exists():
+            store.initialize()
+            store.send(
+                sender=f"worker-{worker_id}",
+                recipient="watchdog",
+                msg_type="health_check",
+                subject=f"Heartbeat from worker-{worker_id}",
+                body=f"Tool #{tool_count}: {tool_name}",
+                metadata={
+                    "type": "heartbeat",
+                    "worker_id": int(worker_id) if worker_id.isdigit() else 0,
+                    "tool_call_count": tool_count,
+                    "last_tool_name": tool_name,
+                },
+            )
+            store.close()
+            _heartbeat_state["last_heartbeat_time"] = now
+    except Exception:
+        pass  # Never crash the worker for heartbeat failures
+
+    return {}
+
+
 # Export all hooks
 __all__ = [
     "configure_marathon",
     "auto_commit_hook",
-    "health_monitor_hook", 
+    "health_monitor_hook",
     "loop_detection_hook",
     "resource_monitor_hook",
     "session_stats_hook",
+    "heartbeat_hook",
     "force_commit",
 ]

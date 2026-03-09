@@ -304,6 +304,43 @@ def create_orchestrator_tool_server(orchestrator: Any):
         result = await orchestrator._tool_wait_seconds(args)
         return {"content": [{"type": "text", "text": _format_result(result)}]}
 
+    @tool(
+        "analyze_stalled_worker",
+        "Request AI triage analysis for a specific worker on demand. "
+        "Use when a worker appears stuck or unresponsive. Returns a triage "
+        "verdict (retry/extend/reassign/terminate) with reasoning and confidence.",
+        {
+            "type": "object",
+            "properties": {
+                "worker_id": {
+                    "type": "integer",
+                    "description": "Worker ID to analyze",
+                },
+            },
+            "required": ["worker_id"],
+        },
+    )
+    async def analyze_stalled_worker(args: dict[str, Any]) -> dict[str, Any]:
+        worker_id = args.get("worker_id", 0)
+        watchdog = getattr(orchestrator, "_watchdog", None)
+        if not watchdog:
+            return {"content": [{"type": "text", "text": _format_result({
+                "error": "Watchdog not available",
+            })}]}
+
+        health = watchdog.workers.get(worker_id)
+        if not health:
+            return {"content": [{"type": "text", "text": _format_result({
+                "error": f"Worker {worker_id} not found in watchdog",
+            })}]}
+
+        import asyncio
+        triage_result = await watchdog._ai_triage_llm(health)
+        return {"content": [{"type": "text", "text": _format_result({
+            "worker_id": worker_id,
+            "triage": triage_result,
+        })}]}
+
     return create_sdk_mcp_server(
         "orchestrator_tools",
         version="1.0.0",
@@ -321,6 +358,7 @@ def create_orchestrator_tool_server(orchestrator: Any):
             run_verification,
             signal_complete,
             wait_seconds,
+            analyze_stalled_worker,
         ],
     )
 
@@ -340,6 +378,7 @@ ORCHESTRATOR_TOOL_NAMES = [
     "mcp__orchestrator_tools__run_verification",
     "mcp__orchestrator_tools__signal_complete",
     "mcp__orchestrator_tools__wait_seconds",
+    "mcp__orchestrator_tools__analyze_stalled_worker",
 ]
 
 

@@ -23,8 +23,9 @@
 | Change Type | Primary Location |
 |-------------|------------------|
 | Prompts (per mode / agent role) | `prompts/` (shared/, greenfield/, feature/, refactor/, fix/, evolve/, security/, agents/) |
-| Hooks (security, capability, marathon) | `hooks/` (security.py, capability_hooks.py, main_hooks.py, marathon_hooks.py) |
+| Hooks (security, capability, marathon, heartbeat) | `hooks/` (security.py, capability_hooks.py, main_hooks.py, marathon_hooks.py) |
 | Agent loop, orchestrators, merge | `core/` (agent.py, engine.py, orchestrator.py, smart_orchestrator.py, merge_resolver.py) |
+| Watchdog health monitoring | `services/watchdog.py` (state machine, AI triage, circuit breaker, event store) |
 | State persistence (tasks, sessions, budget) | `state/` (task_list.py, session_state.py, budget.py, mail.py, events.py) |
 | Mode capabilities (steering, memory, verification) | `features/` (steering.py, memory.py, verification.py, approval.py) |
 | API endpoints and models | `api/` (routers/, models.py, app.py) |
@@ -40,6 +41,7 @@
 - `core/smart_orchestrator.py` — SmartOrchestrator (AI-orchestrated dynamic workers).
 - `core/merge_resolver.py` — 4-tier merge conflict resolution (clean → auto → AI → reimagine).
 - `core/merge_queue.py` — SQLite FIFO merge queue for swarm branch merges.
+- `services/watchdog.py` — SwarmWatchdog: 9-state machine, 6-signal health evaluation, AI triage, circuit breaker, heartbeat protocol, persistent SQLite event log.
 - `frontend/` is a Next.js 15 app (`app/components`, `app/hooks`, `app/utils`).
 - `prompts/` holds mode and role templates; `templates/` holds starter specs; `tests/` holds Python regression tests.
 
@@ -54,6 +56,7 @@
 - Six operation modes: greenfield, feature, refactor, fix, evolve, security
 - Git worktree isolation (merge or discard on completion)
 - Multi-agent swarm (static N or AI-orchestrated Smart Swarm) with inter-agent mail coordination
+- Enhanced watchdog health monitoring: 9-state forward-only state machine, 6-signal health evaluation, active heartbeat protocol, LLM-based AI triage with heuristic fallback, dependency-aware escalation, circuit breaker, per-worker resource monitoring, persistent SQLite event log, YAML-configurable thresholds (`swarmweaver watchdog` CLI)
 - Approval gates, verification loop, security allowlist
 - Cross-project memory, budget tracking, cost analysis
 - Inter-agent mail system: typed payloads, context injection, attachments, dead letter queue, analytics (`swarmweaver mail` CLI)
@@ -70,6 +73,7 @@
 - `npm run build` — build the frontend for production.
 - `npm --prefix frontend run lint` — run frontend lint checks.
 - `pytest tests -q` — run backend test suite.
+- `pytest tests/test_watchdog_enhanced.py -v` — run watchdog health monitoring tests (60 tests).
 - `python tests/test_security.py` — run command-allowlist/security hook regression checks.
 
 ## Coding Style & Naming Conventions

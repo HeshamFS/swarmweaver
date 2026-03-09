@@ -15,7 +15,7 @@
 
 Point it at a spec, a codebase, or a bug report — it works autonomously across unlimited sessions until the job is done. Built for long-running autonomous sessions with audit trails, approval gates, and cost controls.
 
-**Key features:** Six operation modes (greenfield, feature, refactor, fix, evolve, security) · Web UI + CLI · Git worktree isolation · Multi-agent swarm with inter-agent mail · Human-in-the-loop approval gates · Cross-project memory · MCP server integration
+**Key features:** Six operation modes (greenfield, feature, refactor, fix, evolve, security) · Web UI + CLI · Git worktree isolation · Multi-agent swarm with inter-agent mail · Enhanced watchdog health monitoring · Human-in-the-loop approval gates · Cross-project memory · MCP server integration
 
 ## Table of Contents
 
@@ -313,6 +313,13 @@ swarmweaver mail read   -p DIR --all RECIPIENT      # mark all read for recipien
 swarmweaver mail thread -p DIR THREAD_ID            # show conversation thread
 swarmweaver mail stats  -p DIR                      # analytics and bottleneck detection
 swarmweaver mail purge  -p DIR --days 7 --yes       # delete old read messages
+
+# Watchdog health monitoring
+swarmweaver watchdog status  -p DIR                  # fleet score, worker states, circuit breaker
+swarmweaver watchdog events  -p DIR [--worker-id N] [--type TYPE] [--limit 20]
+swarmweaver watchdog config  -p DIR [--set KEY=VALUE] # show or edit watchdog.yaml
+swarmweaver watchdog triage  WORKER_ID -p DIR        # trigger AI triage for a worker
+swarmweaver watchdog nudge   WORKER_ID -p DIR [-m MSG] # send nudge to a worker
 ```
 
 ### Common Flags

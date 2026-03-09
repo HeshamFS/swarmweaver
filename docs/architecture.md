@@ -151,6 +151,63 @@ Swarm workers and orchestrators coordinate through an SQLite-backed mail system 
 - **CLI**: `swarmweaver mail list|send|read|thread|stats|purge`
 - **API**: `GET /api/swarm/mail/analytics`
 
+## Watchdog System
+
+The enhanced watchdog provides production-grade health monitoring for swarm workers:
+
+### 3-Tier Architecture
+
+| Tier | Component | Purpose |
+|------|-----------|---------|
+| **Tier 0: Mechanical Daemon** | `SwarmWatchdog` loop in `services/watchdog.py` | Periodic health checks every 30s, state transitions, nudges |
+| **Tier 1: AI Triage** | `_ai_triage_llm()` | Ephemeral Claude session analyzes stalled workers with 7 data sources |
+| **Tier 2: Monitor Agent** | `analyze_stalled_worker` MCP tool | Orchestrator can request on-demand triage for any worker |
+
+### 9-State Forward-Only State Machine
+
+```
+BOOTING → WORKING → IDLE → WARNING → STALLED → RECOVERING → COMPLETED
+                                                    ↓
+                                                TERMINATED
+Any state → ZOMBIE (PID dead) → TERMINATED
+```
+
+States: `BOOTING`, `WORKING`, `IDLE`, `WARNING`, `STALLED`, `RECOVERING`, `COMPLETED`, `ZOMBIE`, `TERMINATED`. Transitions are validated against an explicit `ALLOWED_TRANSITIONS` table — invalid transitions are rejected.
+
+### 6-Signal Health Evaluation (Priority Order)
+
+1. **asyncio.Task state** — done/cancelled/exception (highest priority)
+2. **PID liveness** — `os.kill(pid, 0)`
+3. **Output freshness** — time since last stdout
+4. **Tool call activity** — catches "thinking" phases that look like stalls
+5. **Git commit activity** — `git log --since` on worker branch
+6. **Heartbeat** — active heartbeat protocol via mail system
+
+### Circuit Breaker
+
+Prevents cascading failures from draining budget:
+- **CLOSED** — normal operation, spawning allowed
+- **OPEN** — >50% failure rate, spawning blocked
+- **HALF_OPEN** — tentatively allow one test spawn after cooldown
+
+### Data Flow
+
+```
+Workers → Heartbeat/Output → Watchdog Daemon → State Machine
+                                    ↓
+                            AI Triage (if stalled)
+                                    ↓
+                    WebSocket Events → Frontend Health Tab
+```
+
+### Persistent Event Log
+
+All state transitions, nudges, triage results, and terminations are recorded in `watchdog_events.db` (SQLite). Query via API (`GET /api/watchdog/events`) or CLI (`swarmweaver watchdog events`).
+
+### Configuration
+
+`watchdog.yaml` in `.swarmweaver/` with env var overrides (`WATCHDOG_*`). See [configuration.md](configuration.md) for full reference.
+
 ## Security Model
 
 Three layers configured in `core/client.py`:

@@ -94,6 +94,13 @@ swarmweaver mcp enable NAME                       # enable a server
 swarmweaver mcp disable NAME                      # disable a server
 swarmweaver mcp test NAME                         # test server connectivity
 
+# Watchdog health monitoring
+swarmweaver watchdog status  -p DIR               # fleet score, worker states, circuit breaker
+swarmweaver watchdog events  -p DIR               # recent watchdog events
+swarmweaver watchdog config  -p DIR               # show or edit watchdog.yaml
+swarmweaver watchdog triage  WORKER_ID -p DIR     # trigger AI triage
+swarmweaver watchdog nudge   WORKER_ID -p DIR     # send nudge to a worker
+
 # Legacy shim (backward compatible — calls cli/main.py internally)
 python autonomous_agent_demo.py feature --project-dir ./app --description "..."
 
@@ -148,7 +155,7 @@ swarmweaver/                  # Project root (SwarmWeaver)
 ├── hooks/                      # Security, management, marathon, capability hooks
 │   ├── __init__.py               # Re-exports all hooks
 │   ├── main_hooks.py             # Server/env/file mgmt, steering, audit, cleanup
-│   ├── marathon_hooks.py         # Auto-commit, health, loop detection, stats, resources
+│   ├── marathon_hooks.py         # Auto-commit, health, loop detection, stats, resources, heartbeat
 │   ├── capability_hooks.py       # Role-based capability enforcement per agent type
 │   └── security.py               # Bash command allowlist validation
 ├── state/                      # Task list, sessions, processes, budget, mail, events
@@ -172,7 +179,7 @@ swarmweaver/                  # Project root (SwarmWeaver)
 │   ├── project_expertise.py      # Project-local expertise store (.swarmweaver/expertise/)
 │   ├── spec_workflow.py          # Spec-driven task workflow (create/read/list)
 │   └── task_tracker.py           # External task sync (GitHub Issues, Jira; abstract interface)
-├── services/                   # Events, templates, ADR, replay, insights, timeline, costs, monitor
+├── services/                   # Events, templates, ADR, replay, insights, timeline, costs, monitor, watchdog
 │   ├── events.py                 # Structured event parser
 │   ├── insights.py               # Session insight analyzer
 │   ├── templates.py              # Project template registry
@@ -181,6 +188,7 @@ swarmweaver/                  # Project root (SwarmWeaver)
 │   ├── adr.py                    # Architecture Decision Record manager
 │   ├── replay.py                 # Session replay via git commit history
 │   ├── monitor.py                # Fleet health monitor
+│   ├── watchdog.py               # SwarmWatchdog: 9-state machine, 6-signal health, AI triage, circuit breaker, SQLite event log
 │   ├── timeline.py               # Cross-agent event timeline
 │   ├── mcp_manager.py            # MCP server config store (two-level merge, CRUD, validate, test)
 │   ├── transcript_costs.py       # Transcript-based cost analysis
@@ -401,6 +409,7 @@ Key endpoint categories:
 | Settings | `GET/POST /api/settings`, `GET/POST /api/projects/settings` |
 | QA/Architect/Plan/Scan | `POST /api/qa/generate`, `POST /api/architect/generate`, `POST /api/plan/generate`, `POST /api/scan/generate`, `POST /api/analyze/generate`, `POST /api/project/prepare` |
 | Specs | `GET /api/specs`, `GET/POST /api/specs/{task_id}` |
+| Watchdog | `GET /api/watchdog/events`, `GET /api/watchdog/config`, `PUT /api/watchdog/config` |
 | Fleet | `GET /api/fleet/health` |
 | MCP | `GET/POST/PUT/DELETE /api/mcp/servers`, `POST /api/mcp/servers/{name}/enable\|disable\|test`, `POST /api/mcp/servers/validate`, `GET /api/mcp/export`, `POST /api/mcp/import` |
 | Health | `GET /api/doctor` |
@@ -442,7 +451,9 @@ All SwarmWeaver artifacts are consolidated under `.swarmweaver/` — delete it a
 │   ├── chains/                      # Session chain data
 │   ├── mcp_servers.json              # Project-level MCP server config (merged with global)
 │   ├── mail.db                      # Inter-agent mail (typed payloads, attachments, dead letters, analytics)
-│   └── events.db                    # Structured event store
+│   ├── events.db                    # Structured event store
+│   ├── watchdog.yaml                # Watchdog health monitor configuration
+│   └── watchdog_events.db           # Persistent watchdog event log (SQLite)
 ├── init.sh                        # Environment setup script (greenfield, stays at root)
 └── docs/adr/                      # Architecture Decision Records (stays at root)
 ```
@@ -479,6 +490,7 @@ For long-running autonomous sessions (hours/days):
 | `loop_detection_hook` | **Auto-detects** when agent is stuck repeating same operations |
 | `session_stats_hook` | **Auto-reports** stats every 100 tool calls (duration, errors) |
 | `resource_monitor_hook` | **Auto-warns** on low disk space (<5GB) |
+| `heartbeat_hook` | **Auto-sends** heartbeat to watchdog every 60s via mail (PostToolUse) |
 
 #### Capability Enforcement Hooks (in `hooks/capability_hooks.py`)
 

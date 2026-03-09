@@ -298,6 +298,9 @@ app.add_typer(mcp_app, name="mcp")
 from cli.commands.mail import mail_app
 app.add_typer(mail_app, name="mail")
 
+from cli.commands.watchdog import watchdog_app
+app.add_typer(watchdog_app, name="watchdog")
+
 
 @checkpoint_app.command("list")
 def checkpoint_list(

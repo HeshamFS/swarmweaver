@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { SwarmWorkersTab } from "./SwarmWorkersTab";
 import { SwarmMailTab } from "./SwarmMailTab";
 import { SwarmMergesTab } from "./SwarmMergesTab";
+import { WatchdogPanel } from "./WatchdogPanel";
 
 interface WorkerState {
   worker_id: number;
@@ -101,16 +102,38 @@ interface TriageResultEntry {
   timestamp: string;
 }
 
+interface WatchdogEventData {
+  id?: string;
+  timestamp: string;
+  event_type: string;
+  worker_id: number;
+  message: string;
+  escalation_level?: number;
+  state_before?: string;
+  state_after?: string;
+  triage_verdict?: string;
+  metadata?: Record<string, unknown>;
+}
+
+interface CircuitBreakerStatusData {
+  state: "closed" | "open" | "half_open";
+  failure_rate: number;
+  failures_in_window: number;
+  successes_in_window: number;
+}
+
 interface SwarmPanelProps {
   projectDir: string;
   output: string[];
   triageResults?: Record<number, TriageResultEntry>;
   mailVersion?: number;  // incremented on mail_received WS event for instant refresh
+  watchdogEvents?: WatchdogEventData[];
+  circuitBreakerStatus?: CircuitBreakerStatusData | null;
 }
 
-type SwarmTab = "workers" | "mail" | "merges";
+type SwarmTab = "workers" | "mail" | "merges" | "health";
 
-export function SwarmPanel({ projectDir, output, triageResults, mailVersion }: SwarmPanelProps) {
+export function SwarmPanel({ projectDir, output, triageResults, mailVersion, watchdogEvents, circuitBreakerStatus }: SwarmPanelProps) {
   const [workers, setWorkers] = useState<WorkerState[]>([]);
   const [numWorkers, setNumWorkers] = useState(0);
   const [maxDepth, setMaxDepth] = useState(2);
@@ -353,13 +376,13 @@ export function SwarmPanel({ projectDir, output, triageResults, mailVersion }: S
 
       {/* Tab selector */}
       <div className="flex border-b border-border-subtle bg-surface-raised shrink-0" role="tablist" aria-label="Swarm panel tabs">
-        {(["workers", "mail", "merges"] as SwarmTab[]).map((tab) => (
+        {(["workers", "mail", "merges", "health"] as SwarmTab[]).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
             role="tab"
             aria-selected={activeTab === tab}
-            aria-label={`${tab === "mail" ? "Mail" : tab === "merges" ? "Merges" : "Workers"} tab`}
+            aria-label={`${tab === "mail" ? "Mail" : tab === "merges" ? "Merges" : tab === "health" ? "Health" : "Workers"} tab`}
             className={`flex-1 px-3 py-1.5 text-xs font-mono transition-colors relative ${
               activeTab === tab
                 ? "text-text-primary"
@@ -375,7 +398,7 @@ export function SwarmPanel({ projectDir, output, triageResults, mailVersion }: S
                   </span>
                 )}
               </span>
-            ) : tab === "merges" ? "Merges" : "Workers"}
+            ) : tab === "merges" ? "Merges" : tab === "health" ? "Health" : "Workers"}
             {activeTab === tab && (
               <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-accent" />
             )}
@@ -426,6 +449,15 @@ export function SwarmPanel({ projectDir, output, triageResults, mailVersion }: S
             mergeQueueStats={mergeQueueStats}
             mergeReport={mergeReport}
             conflictPrediction={conflictPrediction}
+          />
+        )}
+
+        {activeTab === "health" && (
+          <WatchdogPanel
+            projectDir={projectDir}
+            watchdogEvents={watchdogEvents}
+            circuitBreakerStatus={circuitBreakerStatus}
+            triageResults={triageResults as Record<number, { worker_id: number; verdict: "retry" | "terminate" | "extend" | "reassign"; reasoning: string; confidence: number; recommended_action?: string; suggested_nudge_message?: string }>}
           />
         )}
       </div>

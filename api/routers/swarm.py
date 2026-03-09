@@ -6,7 +6,7 @@ import signal
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Body, Query
 
 from core.paths import get_paths
 from api.state import _running_engines
@@ -270,3 +270,72 @@ async def terminate_worker(worker_id: str, req: TerminateRequest):
         return {"status": "error", "message": f"Worker '{worker_id}' not found in swarm state"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+@router.get("/api/watchdog/events")
+async def get_watchdog_events(
+    path: str = Query(..., description="Project directory path"),
+    worker_id: Optional[int] = Query(None, description="Filter by worker ID"),
+    event_type: Optional[str] = Query(None, description="Filter by event type"),
+    limit: int = Query(50, description="Max events to return"),
+):
+    """Query the persistent watchdog event log."""
+    try:
+        from services.watchdog import WatchdogEventStore
+        store = WatchdogEventStore(Path(path))
+        if not store.db_path.exists():
+            return {"events": [], "summary": {"total": 0, "by_type": {}, "recent_events": []}}
+        store.initialize()
+        events = store.query(worker_id=worker_id, event_type=event_type, limit=limit)
+        summary = store.get_summary()
+        store.close()
+        return {"events": events, "summary": summary}
+    except Exception as e:
+        return {"events": [], "summary": {}, "error": str(e)}
+
+
+@router.get("/api/watchdog/config")
+async def get_watchdog_config(
+    path: str = Query(..., description="Project directory path"),
+):
+    """Get current watchdog configuration."""
+    try:
+        from services.watchdog import WatchdogConfig
+        config = WatchdogConfig.load(Path(path))
+        return config.to_dict()
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.put("/api/watchdog/config")
+async def update_watchdog_config(
+    path: str = Query(..., description="Project directory path"),
+    updates: dict = Body(..., description="Config fields to update"),
+):
+    """Live-edit watchdog configuration. Merges with existing config."""
+    try:
+        from services.watchdog import WatchdogConfig
+        config = WatchdogConfig.load(Path(path))
+        for key, value in updates.items():
+            if hasattr(config, key):
+                field_type = type(getattr(config, key))
+                try:
+                    if field_type is set:
+                        setattr(config, key, set(value) if isinstance(value, list) else value)
+                    else:
+                        setattr(config, key, field_type(value))
+                except (ValueError, TypeError):
+                    pass
+        config.save(Path(path))
+
+        # Try to update live watchdog instance
+        for mode in ("feature", "greenfield", "refactor", "fix", "evolve"):
+            key = f"native_{mode}_{path}"
+            runner = _running_engines.get(key)
+            if runner and hasattr(runner, "_watchdog"):
+                runner._watchdog.update_config(updates)
+                break
+
+        return config.to_dict()
+    except Exception as e:
+        return {"error": str(e)}

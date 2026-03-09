@@ -410,6 +410,67 @@ def create_worker_tool_server(
             result = {"error": str(e)}
         return {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
 
+    @tool(
+        "heartbeat",
+        (
+            "Send a heartbeat to the watchdog health monitor. "
+            "This is called automatically by hooks, but you can also call it manually "
+            "to report your current status, progress, and tool call count."
+        ),
+        {
+            "type": "object",
+            "properties": {
+                "current_task": {
+                    "type": "string",
+                    "description": "Task ID you are currently working on",
+                },
+                "progress_pct": {
+                    "type": "number",
+                    "description": "Estimated progress percentage (0-100)",
+                },
+                "status_note": {
+                    "type": "string",
+                    "description": "Brief status note (e.g. 'debugging test failure')",
+                },
+            },
+            "required": [],
+        },
+    )
+    async def heartbeat(args: dict[str, Any]) -> dict[str, Any]:
+        current_task = args.get("current_task", "")
+        progress = args.get("progress_pct", 0)
+        status_note = args.get("status_note", "")
+
+        # Send heartbeat via mail to watchdog
+        if _mail_dir:
+            try:
+                store = MailStore(_mail_dir)
+                store.initialize()
+                store.send(
+                    sender=f"worker-{worker_id}",
+                    recipient="watchdog",
+                    msg_type="health_check",
+                    subject=f"Heartbeat from worker-{worker_id}",
+                    body=status_note or "Alive",
+                    metadata={
+                        "type": "heartbeat",
+                        "current_task": current_task,
+                        "progress_pct": progress,
+                        "worker_id": worker_id,
+                    },
+                )
+            except Exception:
+                pass
+
+        result = {
+            "ok": True,
+            "worker_id": worker_id,
+            "heartbeat_sent": True,
+            "current_task": current_task,
+            "progress_pct": progress,
+        }
+        return {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
+
     return create_sdk_mcp_server(
         "worker_tools",
         version="1.0.0",
@@ -421,6 +482,7 @@ def create_worker_tool_server(
             report_to_orchestrator,
             get_my_ports,
             close_my_ports,
+            heartbeat,
         ],
     )
 
@@ -434,4 +496,5 @@ WORKER_TOOL_NAMES = [
     "mcp__worker_tools__report_to_orchestrator",
     "mcp__worker_tools__get_my_ports",
     "mcp__worker_tools__close_my_ports",
+    "mcp__worker_tools__heartbeat",
 ]

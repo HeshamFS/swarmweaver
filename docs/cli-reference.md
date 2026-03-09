@@ -164,6 +164,34 @@ Message types: `dispatch`, `worker_done`, `worker_progress`, `error`, `escalatio
 
 Priority levels: `low`, `normal`, `high`, `urgent`.
 
+### Watchdog Health Monitoring
+
+Monitor swarm worker health, view events, and manage the watchdog configuration.
+
+```bash
+# Fleet overview: health score, worker states, circuit breaker, recent events
+swarmweaver watchdog status  -p DIR
+
+# Query event log (state changes, nudges, triage, terminations)
+swarmweaver watchdog events  -p DIR                   # last 20 events
+swarmweaver watchdog events  -p DIR --worker-id 3     # events for worker 3
+swarmweaver watchdog events  -p DIR --type triage      # only triage events
+swarmweaver watchdog events  -p DIR --limit 50         # more events
+
+# Show or edit watchdog configuration
+swarmweaver watchdog config  -p DIR                   # show current config as JSON
+swarmweaver watchdog config  -p DIR --set stall_threshold_s=600   # change a value
+
+# On-demand AI triage for a specific worker
+swarmweaver watchdog triage  WORKER_ID -p DIR
+
+# Send a nudge to a stuck worker
+swarmweaver watchdog nudge   WORKER_ID -p DIR
+swarmweaver watchdog nudge   WORKER_ID -p DIR -m "Please check test failures"
+```
+
+Events are stored in `.swarmweaver/watchdog_events.db` (SQLite). Configuration is stored in `.swarmweaver/watchdog.yaml`.
+
 ## Legacy Invocation
 
 For backward compatibility:

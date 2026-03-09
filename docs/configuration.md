@@ -74,6 +74,42 @@ All enabled MCP servers are automatically loaded into every agent session — si
 Export your MCP server config for sharing or backup:
 - **CLI/API**: `GET /api/mcp/export` returns the merged config; `POST /api/mcp/import` loads a config file
 
+## Watchdog Configuration: watchdog.yaml
+
+The watchdog health monitor is configured via `.swarmweaver/watchdog.yaml`. All values can also be set via environment variables prefixed with `WATCHDOG_`.
+
+```yaml
+# .swarmweaver/watchdog.yaml
+enabled: true
+check_interval_s: 30.0        # How often to check worker health
+idle_threshold_s: 120.0        # Seconds of no output before IDLE
+stall_threshold_s: 300.0       # Seconds of no output before STALLED
+zombie_threshold_s: 600.0      # Seconds before considering worker a ZOMBIE
+boot_grace_s: 60.0             # Grace period for newly spawned workers
+nudge_interval_s: 60.0         # Minimum time between nudges
+max_nudge_attempts: 3          # Max nudges before escalating to triage
+ai_triage_enabled: true        # Use LLM for stall analysis
+triage_timeout_s: 30.0         # Timeout for AI triage calls
+triage_context_lines: 50       # Lines of output to include in triage context
+triage_model: ""               # Model for triage (empty = use WORKER_MODEL)
+auto_reassign: true            # Auto-reassign tasks from terminated workers
+circuit_breaker_enabled: true  # Enable cascade failure prevention
+max_failure_rate: 0.5          # Failure rate threshold to open circuit breaker
+circuit_breaker_window_s: 600.0  # Sliding window for failure rate calculation
+persistent_roles:              # Roles exempt from stall detection
+  - coordinator
+  - monitor
+```
+
+Environment variable overrides use the `WATCHDOG_` prefix:
+```bash
+WATCHDOG_STALL_THRESHOLD_S=600       # Override stall threshold
+WATCHDOG_AI_TRIAGE_ENABLED=false     # Disable AI triage
+WATCHDOG_MAX_FAILURE_RATE=0.3        # Stricter circuit breaker
+```
+
+Live editing via API: `PUT /api/watchdog/config` (merges with existing config).
+
 ## Project Artifacts: .swarmweaver/
 
 Each target project gets a `.swarmweaver/` directory with session state and artifacts:
@@ -98,6 +134,8 @@ Each target project gets a `.swarmweaver/` directory with session state and arti
 | `approval_pending.json` | Task approval gate state |
 | `mcp_servers.json` | Project-level MCP server config (merged with global) |
 | `mail.db` | Inter-agent mail database (SQLite WAL mode) |
+| `watchdog.yaml` | Watchdog health monitor configuration |
+| `watchdog_events.db` | Persistent watchdog event log (SQLite) |
 
 Delete `.swarmweaver/` to reset a project; SwarmWeaver will recreate it on the next run.
 

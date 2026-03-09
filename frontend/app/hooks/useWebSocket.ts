@@ -62,6 +62,26 @@ export interface MonitorHealthSummary {
   timestamp: string;
 }
 
+export interface WatchdogEvent {
+  id?: string;
+  timestamp: string;
+  event_type: string;
+  worker_id: number;
+  message: string;
+  escalation_level?: number;
+  state_before?: string;
+  state_after?: string;
+  triage_verdict?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface CircuitBreakerStatus {
+  state: "closed" | "open" | "half_open";
+  failure_rate: number;
+  failures_in_window: number;
+  successes_in_window: number;
+}
+
 export interface UseWebSocketReturn {
   wsRef: React.MutableRefObject<WebSocket | null>;
   wsConnected: boolean;
@@ -79,6 +99,8 @@ export interface UseWebSocketReturn {
   monitorHealth: MonitorHealthSummary | null;
   monitorTrend: number[];
   workerTokenMap: Record<number, { input: number; output: number; cacheRead: number; cacheCreation: number }>;
+  watchdogEvents: WatchdogEvent[];
+  circuitBreakerStatus: CircuitBreakerStatus | null;
 }
 
 /** Backend WS URL — direct to FastAPI on port 8000. */
@@ -115,6 +137,9 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
   const [monitorTrend, setMonitorTrend] = useState<number[]>([]);
   // Per-worker token tracking (keyed by worker_id number)
   const [workerTokenMap, setWorkerTokenMap] = useState<Record<number, { input: number; output: number; cacheRead: number; cacheCreation: number }>>({});
+  // Watchdog events
+  const [watchdogEvents, setWatchdogEvents] = useState<WatchdogEvent[]>([]);
+  const [circuitBreakerStatus, setCircuitBreakerStatus] = useState<CircuitBreakerStatus | null>(null);
 
   const close = useCallback(() => {
     if (reconnectTimerRef.current) {
@@ -464,6 +489,84 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
               const next = [...prev, { type: eventType, timestamp: msg.timestamp || new Date().toISOString(), data: msg.data } as AgentEvent];
               return next;
             });
+          // --- Watchdog events (W4-3) ---
+          } else if (msg.type === "watchdog_state_change") {
+            const d = msg.data || msg;
+            setWatchdogEvents((prev) => {
+              const ev: WatchdogEvent = {
+                timestamp: (msg.timestamp as string) || new Date().toISOString(),
+                event_type: "state_change",
+                worker_id: d.worker_id as number,
+                message: `${d.old_state} → ${d.new_state}: ${d.reason || ""}`,
+                state_before: d.old_state as string,
+                state_after: d.new_state as string,
+              };
+              const next = [ev, ...prev];
+              return next.length > 100 ? next.slice(0, 100) : next;
+            });
+          } else if (msg.type === "watchdog_nudge") {
+            const d = msg.data || msg;
+            setWatchdogEvents((prev) => {
+              const ev: WatchdogEvent = {
+                timestamp: (msg.timestamp as string) || new Date().toISOString(),
+                event_type: "nudge",
+                worker_id: d.worker_id as number,
+                message: `Nudge via ${d.method}: ${d.message || ""}`,
+              };
+              return [ev, ...prev].slice(0, 100);
+            });
+          } else if (msg.type === "watchdog_triage") {
+            const d = msg.data || msg;
+            const workerId = d.worker_id as number;
+            if (workerId != null) {
+              setTriageResults((prev) => ({
+                ...prev,
+                [workerId]: {
+                  worker_id: workerId,
+                  verdict: d.verdict as TriageResult["verdict"],
+                  reasoning: (d.reasoning as string) || "",
+                  recommended_action: "",
+                  timestamp: (msg.timestamp as string) || new Date().toISOString(),
+                },
+              }));
+            }
+            setWatchdogEvents((prev) => {
+              const ev: WatchdogEvent = {
+                timestamp: (msg.timestamp as string) || new Date().toISOString(),
+                event_type: "triage",
+                worker_id: d.worker_id as number,
+                message: `Verdict: ${d.verdict} (confidence: ${((d.confidence as number) || 0) * 100}%)`,
+                triage_verdict: d.verdict as string,
+              };
+              return [ev, ...prev].slice(0, 100);
+            });
+          } else if (msg.type === "watchdog_circuit_breaker") {
+            const d = msg.data || msg;
+            setCircuitBreakerStatus({
+              state: d.state as CircuitBreakerStatus["state"],
+              failure_rate: (d.failure_rate as number) || 0,
+              failures_in_window: (d.failures_in_window as number) || 0,
+              successes_in_window: (d.successes_in_window as number) || 0,
+            });
+          } else if (msg.type === "run_complete") {
+            const d = msg.data || msg;
+            const completed = (d.completed as number) || 0;
+            const failed = (d.failed as number) || 0;
+            const total = (d.total as number) || 0;
+            onBrowserNotification(
+              "Swarm Complete",
+              `${completed}/${total} workers succeeded, ${failed} failed`,
+              "run_complete"
+            );
+            setWatchdogEvents((prev) => {
+              const ev: WatchdogEvent = {
+                timestamp: (msg.timestamp as string) || new Date().toISOString(),
+                event_type: "run_complete",
+                worker_id: -1,
+                message: `Run complete: ${completed}/${total} succeeded, ${failed} failed`,
+              };
+              return [ev, ...prev].slice(0, 100);
+            });
           } else if (msg.type && msg.timestamp && msg.type !== "output" && msg.type !== "status") {
             const safeData: Record<string, unknown> = {};
             if (msg.data && typeof msg.data === "object") {
@@ -559,5 +662,7 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
     monitorHealth,
     monitorTrend,
     workerTokenMap,
+    watchdogEvents,
+    circuitBreakerStatus,
   };
 }
