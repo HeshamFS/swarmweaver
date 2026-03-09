@@ -29,6 +29,51 @@ max_iterations = 10
 
 When `SWARMWEAVER_URL` is set (env) or `server.url` is set (config), the CLI delegates execution to that server instead of running locally.
 
+## MCP Server Configuration
+
+MCP (Model Context Protocol) servers extend agent capabilities with external tools. SwarmWeaver uses a **two-level config merge** so you can set global defaults and override per project.
+
+### Config Files
+
+| File | Scope | Purpose |
+|------|-------|---------|
+| `~/.swarmweaver/mcp_servers.json` | Global | Applies to all projects |
+| `.swarmweaver/mcp_servers.json` | Project | Overrides global settings for this project |
+
+Project-level entries override global entries with the same name. Both files use the same JSON format:
+
+```json
+{
+  "servers": {
+    "my-database": {
+      "command": "npx",
+      "args": ["my-db-mcp-server", "--connection", "postgresql://..."],
+      "enabled": true
+    }
+  }
+}
+```
+
+### Built-in Servers
+
+Two servers are always available without configuration:
+- **puppeteer** — Browser automation for UI testing (`npx puppeteer-mcp-server`)
+- **web_search** — Web search via `web_search_server.py`
+
+### Managing Servers
+
+Servers can be managed three ways:
+- **CLI**: `swarmweaver mcp list|add|remove|enable|disable|test`
+- **REST API**: `GET/POST/PUT/DELETE /api/mcp/servers` plus enable, disable, test, validate, import, and export endpoints
+- **Web UI**: MCPPanel in Settings
+
+All enabled MCP servers are automatically loaded into every agent session — single agent, swarm workers, and smart orchestrator all get the same set of servers.
+
+### Import / Export
+
+Export your MCP server config for sharing or backup:
+- **CLI/API**: `GET /api/mcp/export` returns the merged config; `POST /api/mcp/import` loads a config file
+
 ## Project Artifacts: .swarmweaver/
 
 Each target project gets a `.swarmweaver/` directory with session state and artifacts:
@@ -51,6 +96,7 @@ Each target project gets a `.swarmweaver/` directory with session state and arti
 | `checkpoints.json` | File state checkpoints for rollback |
 | `steering_input.json` | Human-in-the-loop steering messages |
 | `approval_pending.json` | Task approval gate state |
+| `mcp_servers.json` | Project-level MCP server config (merged with global) |
 
 Delete `.swarmweaver/` to reset a project; SwarmWeaver will recreate it on the next run.
 

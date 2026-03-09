@@ -292,6 +292,9 @@ def logs_cmd(
 checkpoint_app = typer.Typer(help="Checkpoint management commands")
 app.add_typer(checkpoint_app, name="checkpoint")
 
+from cli.commands.mcp import mcp_app
+app.add_typer(mcp_app, name="mcp")
+
 
 @checkpoint_app.command("list")
 def checkpoint_list(

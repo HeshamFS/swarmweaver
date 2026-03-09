@@ -155,6 +155,12 @@ def create_client(
     paths = get_paths(project_dir)
     paths.ensure_dir()
 
+    # Load user-configured MCP servers
+    from services.mcp_manager import MCPConfigStore
+    mcp_store = MCPConfigStore(project_dir)
+    user_mcp_servers = mcp_store.get_enabled_sdk_servers()
+    user_mcp_tool_names = mcp_store.get_enabled_tool_names()
+
     # Configure hook file paths and process registry
     if enable_audit_logging:
         set_audit_log_path(paths.audit_log)
@@ -257,10 +263,8 @@ def create_client(
                 "TodoWrite(*)",
                 "WebSearch(*)",
                 "WebFetch(*)",
-                # Allow Puppeteer MCP tools for browser automation
-                *PUPPETEER_TOOLS,
-                # Allow web search MCP tools for fetching external information
-                *WEB_SEARCH_TOOLS,
+                # Allow all configured MCP server tools
+                *[f"mcp__{s}__*" for s in user_mcp_servers.keys()],
             ],
         },
     }
@@ -296,22 +300,9 @@ CRITICAL: You have access to powerful tools - USE THEM:
 DON'T GUESS - SEARCH! Web search is fast and free. Read docs before implementing.""",
         "allowed_tools": [
             *BUILTIN_TOOLS,
-            *PUPPETEER_TOOLS,
-            *WEB_SEARCH_TOOLS,
+            *user_mcp_tool_names,
         ],
-        "mcp_servers": {
-            "puppeteer": {
-                "command": "npx",
-                "args": ["puppeteer-mcp-server"],
-                "env": {
-                    "PUPPETEER_LAUNCH_OPTIONS": '{"protocolTimeout": 300000}',
-                },
-            },
-            "web_search": {
-                "command": sys.executable,  # Use the same Python as the running process (venv)
-                "args": [str(Path(__file__).parent.parent.resolve() / "services" / "web_search_server.py")]
-            }
-        },
+        "mcp_servers": user_mcp_servers,
         "hooks": hooks,
         "max_turns": 1000,
         "cwd": str(project_dir.resolve()),
@@ -393,7 +384,8 @@ DON'T GUESS - SEARCH! Web search is fast and free. Read docs before implementing
     print("   - Sandbox enabled (OS-level bash isolation)")
     print(f"   - Filesystem restricted to: {project_dir.resolve()}")
     print("   - Bash commands restricted to allowlist (see security.py)")
-    print("   - MCP servers: puppeteer (browser automation), web_search (external info)")
+    mcp_names = list(user_mcp_servers.keys())
+    print(f"   - MCP servers: {', '.join(mcp_names) if mcp_names else 'none'}")
     print(f"   - Checkpointing: {'enabled' if enable_checkpointing else 'disabled'}")
     print(f"   - Subagents: {'enabled' if enable_subagents else 'disabled'}")
     print(f"   - Audit logging: {'enabled' if enable_audit_logging else 'disabled'}")

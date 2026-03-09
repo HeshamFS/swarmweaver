@@ -86,6 +86,14 @@ swarmweaver feature --project-dir ./app --description "..." --max-iterations 5
 swarmweaver feature --project-dir ./app --description "..." --model claude-sonnet-4-6
 swarmweaver feature --project-dir ./app --description "..." --no-resume
 
+# MCP server management
+swarmweaver mcp list                              # list all configured MCP servers
+swarmweaver mcp add NAME --command "CMD"          # add a new MCP server
+swarmweaver mcp remove NAME                       # remove an MCP server
+swarmweaver mcp enable NAME                       # enable a server
+swarmweaver mcp disable NAME                      # disable a server
+swarmweaver mcp test NAME                         # test server connectivity
+
 # Legacy shim (backward compatible — calls cli/main.py internally)
 python autonomous_agent_demo.py feature --project-dir ./app --description "..."
 
@@ -107,14 +115,14 @@ Set one of these environment variables (copy `.env.example` to `.env`):
 swarmweaver/                  # Project root (SwarmWeaver)
 ├── cli/                        # CLI package — entry point: `swarmweaver` (pyproject.toml scripts)
 │   ├── main.py                   # Typer app with all subcommands
-│   ├── commands/                 # One module per subcommand
+│   ├── commands/                 # One module per subcommand (incl. mcp.py for MCP server management)
 │   ├── client.py                 # HTTP client for connected mode (SWARMWEAVER_URL)
 │   ├── config.py                 # ~/.swarmweaver/config.toml loader
 │   ├── output.py                 # Rich / JSON output formatters
 │   └── wizard.py                 # Interactive wizard flow
 ├── api/                        # FastAPI package — app factory, routers, WebSocket
 │   ├── app.py                    # FastAPI app factory
-│   ├── routers/                  # One router per domain (tasks, swarm, worktree, …)
+│   ├── routers/                  # One router per domain (tasks, swarm, worktree, mcp, …)
 │   ├── websocket/                # WebSocket stream handlers
 │   ├── helpers.py                # Shared request/response helpers
 │   ├── models.py                 # Pydantic request/response models
@@ -174,6 +182,7 @@ swarmweaver/                  # Project root (SwarmWeaver)
 │   ├── replay.py                 # Session replay via git commit history
 │   ├── monitor.py                # Fleet health monitor
 │   ├── timeline.py               # Cross-agent event timeline
+│   ├── mcp_manager.py            # MCP server config store (two-level merge, CRUD, validate, test)
 │   ├── transcript_costs.py       # Transcript-based cost analysis
 │   └── logger.py                 # Structured logging
 ├── utils/                      # API keys, progress, sanitizer, safe logging
@@ -269,6 +278,7 @@ Decision logic in `main()` and server: `smart_swarm` → SmartSwarm; `parallel >
 | `services/timeline.py` | Cross-agent event timeline: merges events, mail, audit into one stream |
 | `services/transcript_costs.py` | Transcript-based cost analysis: per-agent, per-model, with cache pricing |
 | `services/insights.py` | Session insight analyzer: top tools, hot files, error frequency |
+| `services/mcp_manager.py` | MCP server config store: two-level merge, CRUD, validate, test, import/export |
 | `web_search_server.py` | MCP server that wraps Claude's web search tool for agent use |
 
 ### Two-Layer Agent System
@@ -351,8 +361,17 @@ Additionally:
 
 ### MCP Servers
 
+SwarmWeaver ships with two built-in MCP servers and supports user-configurable servers via CLI, API, or Web UI:
+
+**Built-in servers (always available):**
 - **puppeteer** - Browser automation for UI testing (`npx puppeteer-mcp-server`)
 - **web_search** - Web search via `web_search_server.py`
+
+**User-configurable servers:**
+- Managed via `swarmweaver mcp list|add|remove|enable|disable|test` (CLI), REST API, or MCPPanel in Web UI Settings
+- Two-level config merge: `~/.swarmweaver/mcp_servers.json` (global, applies to all projects) + `.swarmweaver/mcp_servers.json` (project-level overrides)
+- `services/mcp_manager.py` — `MCPConfigStore` handles CRUD, enable/disable, validate, test, import/export
+- `core/client.py` loads all enabled MCP servers automatically into every agent session (single agent, swarm workers, and smart orchestrator)
 
 ### REST API (60+ Endpoints)
 
@@ -382,6 +401,7 @@ Key endpoint categories:
 | QA/Architect/Plan/Scan | `POST /api/qa/generate`, `POST /api/architect/generate`, `POST /api/plan/generate`, `POST /api/scan/generate`, `POST /api/analyze/generate`, `POST /api/project/prepare` |
 | Specs | `GET /api/specs`, `GET/POST /api/specs/{task_id}` |
 | Fleet | `GET /api/fleet/health` |
+| MCP | `GET/POST/PUT/DELETE /api/mcp/servers`, `POST /api/mcp/servers/{name}/enable\|disable\|test`, `POST /api/mcp/servers/validate`, `GET /api/mcp/export`, `POST /api/mcp/import` |
 | Health | `GET /api/doctor` |
 | Files | `GET /api/browse`, `POST /api/mkdir` |
 | WebSocket | `WS /ws/run`, `WS /ws/architect`, `WS /ws/plan`, `WS /ws/wizard` |
@@ -419,6 +439,7 @@ All SwarmWeaver artifacts are consolidated under `.swarmweaver/` — delete it a
 │   ├── worktrees/                   # Git worktrees for isolated runs
 │   ├── runs/                        # Run history
 │   ├── chains/                      # Session chain data
+│   ├── mcp_servers.json              # Project-level MCP server config (merged with global)
 │   ├── mail.db                      # Inter-agent messaging
 │   └── events.db                    # Structured event store
 ├── init.sh                        # Environment setup script (greenfield, stays at root)

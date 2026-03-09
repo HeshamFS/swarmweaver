@@ -15,7 +15,7 @@
 
 Point it at a spec, a codebase, or a bug report — it works autonomously across unlimited sessions until the job is done. Built for long-running autonomous sessions with audit trails, approval gates, and cost controls.
 
-**Key features:** Six operation modes (greenfield, feature, refactor, fix, evolve, security) · Web UI + CLI · Git worktree isolation · Multi-agent swarm · Human-in-the-loop approval gates · Cross-project memory
+**Key features:** Six operation modes (greenfield, feature, refactor, fix, evolve, security) · Web UI + CLI · Git worktree isolation · Multi-agent swarm · Human-in-the-loop approval gates · Cross-project memory · MCP server integration
 
 ## Table of Contents
 
@@ -296,6 +296,14 @@ swarmweaver checkpoint  --project-dir DIR [--restore ID]  # list or restore chec
 
 # Project initialization
 swarmweaver init        --project-dir DIR           # bootstrap .swarmweaver/ scaffold
+
+# MCP server management
+swarmweaver mcp list                                # list configured MCP servers
+swarmweaver mcp add NAME --command "CMD"            # add a new MCP server
+swarmweaver mcp remove NAME                         # remove an MCP server
+swarmweaver mcp enable NAME                         # enable a server
+swarmweaver mcp disable NAME                        # disable a server
+swarmweaver mcp test NAME                           # test server connectivity
 ```
 
 ### Common Flags
@@ -392,6 +400,7 @@ Start with `npm run dev` and open [http://localhost:3000](http://localhost:3000)
 - **Swarm panel** — per-worker controls, mail threads, merge queue, nudge/terminate buttons
 - **Observability panel** — 9 sub-tabs: Timeline, Files, Costs, Errors, Audit, Insights, Agents, Checkpoints, Profile
 - **Session replay** — scrub through git commit history with task state snapshots
+- **MCP server management** — add, remove, enable/disable, and test MCP servers from Settings
 - **Notifications** — Slack, Discord, browser push, and generic webhooks
 
 ## Architecture

@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import type { GlobalSettings, ThemeId } from "../hooks/useGlobalSettings";
 import { MODELS, PRESETS } from "../utils/constants";
 import { FolderPicker } from "./FolderPicker";
+import { MCPModal } from "./MCPPanel";
 import { Check, XCircle } from "lucide-react";
 
 const THEMES: { id: ThemeId; label: string; color: string }[] = [
@@ -67,6 +68,7 @@ export function SettingsPanel({ open, onClose, settings, onUpdate, syncing, onSy
   const [showKeyInputs, setShowKeyInputs] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
   const [showFolderPicker, setShowFolderPicker] = useState(false);
+  const [mcpOpen, setMcpOpen] = useState(false);
   const themeRef = useRef<HTMLDivElement>(null);
 
   /* Close theme dropdown on click outside */
@@ -506,6 +508,22 @@ export function SettingsPanel({ open, onClose, settings, onUpdate, syncing, onSy
             </div>
           </Section>
 
+          {/* MCP Servers */}
+          <Section title="Integrations">
+            <button
+              onClick={() => setMcpOpen(true)}
+              className="flex items-center justify-between w-full bg-[#1A1A1A] text-[#E0E0E0] text-[11px] font-mono px-2 py-1.5 border border-[#333] hover:border-[var(--color-accent)] transition-colors"
+            >
+              <span className="flex items-center gap-2">
+                <svg className="w-3.5 h-3.5 text-[#888]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="2" y="2" width="20" height="8" rx="2" ry="2" /><rect x="2" y="14" width="20" height="8" rx="2" ry="2" /><line x1="6" y1="6" x2="6.01" y2="6" /><line x1="6" y1="18" x2="6.01" y2="18" />
+                </svg>
+                MCP Servers
+              </span>
+              <span className="text-[10px] text-[#555]">{"Configure \u203A"}</span>
+            </button>
+          </Section>
+
           {/* Presets - compact single-line segmented control */}
           <Section title="Presets">
             <div className="flex border border-[#333] bg-[#0C0C0C]">
@@ -546,6 +564,14 @@ export function SettingsPanel({ open, onClose, settings, onUpdate, syncing, onSy
           </button>
         </div>
       </div>
+
+      {/* MCP Servers modal */}
+      {mcpOpen && (
+        <MCPModal
+          projectDir={settings.defaultBrowsePath || "."}
+          onClose={() => setMcpOpen(false)}
+        />
+      )}
 
       {/* Folder picker for default browse path */}
       {showFolderPicker && (

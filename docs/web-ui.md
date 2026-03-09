@@ -77,6 +77,18 @@ Nine sub-tabs for deep inspection:
 
 Scrub through git commit history with task state snapshots. Replay how the codebase evolved over the session.
 
+### MCP Server Management
+
+The Settings panel includes an MCPPanel for managing MCP (Model Context Protocol) servers. From the Web UI you can:
+
+- View all configured servers (built-in and user-added) with their status
+- Add new MCP servers with command and arguments
+- Enable or disable servers without removing them
+- Test server connectivity
+- Remove user-configured servers
+
+Changes apply to all subsequent agent sessions. See [configuration.md](configuration.md) for details on the two-level config merge (global + project).
+
 ### Notifications
 
 Configure Slack, Discord, browser push, or generic webhooks to receive alerts when runs complete or fail.

@@ -56,6 +56,7 @@
 - Multi-agent swarm (static N or AI-orchestrated Smart Swarm)
 - Approval gates, verification loop, security allowlist
 - Cross-project memory, budget tracking, cost analysis
+- User-configurable MCP servers (global + per-project) with built-in puppeteer and web search
 - Chat wizard flow with streaming (QA, architect, plan, security review)
 - 4-tier merge conflict resolution for swarm
 

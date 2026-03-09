@@ -46,6 +46,25 @@ swarmweaver checkpoint  --project-dir DIR [--restore ID]  # list or restore chec
 swarmweaver init        --project-dir DIR        # bootstrap .swarmweaver/ scaffold
 ```
 
+### MCP Server Management
+
+Manage MCP (Model Context Protocol) servers that extend agent capabilities. Configured servers are automatically loaded into every agent session.
+
+```bash
+swarmweaver mcp list                              # list all configured MCP servers (built-in + user)
+swarmweaver mcp add NAME --command "CMD"          # add a new MCP server
+swarmweaver mcp remove NAME                       # remove an MCP server
+swarmweaver mcp enable NAME                       # enable a disabled server
+swarmweaver mcp disable NAME                      # disable a server without removing it
+swarmweaver mcp test NAME                         # test server connectivity
+```
+
+Servers are stored in two config files that are merged at runtime:
+- `~/.swarmweaver/mcp_servers.json` — global (applies to all projects)
+- `.swarmweaver/mcp_servers.json` — project-level (overrides global for that project)
+
+Two built-in servers (puppeteer, web_search) are always available. Use `swarmweaver mcp add` to register additional servers like databases, custom APIs, or specialized tools.
+
 ## Common Flags
 
 | Flag | Description | Default |
