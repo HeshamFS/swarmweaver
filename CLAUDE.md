@@ -145,7 +145,7 @@ swarmweaver/                  # Project root (SwarmWeaver)
 ├── server.py                   # Backward-compatible shim → api/app.py
 ├── web_search_server.py        # MCP server (standalone)
 ├── core/                       # Agent loop, client, engine, orchestrator, merge, swarm, worktree
-│   ├── agent.py                  # Multi-phase session loop with memory harvesting
+│   ├── agent.py                  # Multi-phase session loop with MELS expertise harvesting
 │   ├── agent_roles.py            # Two-layer agent role system with overlay generation
 │   ├── client.py                 # Claude SDK client with security, MCP, hooks
 │   ├── engine.py                 # Execution engine (single-agent runs, SDK streaming)
@@ -175,21 +175,25 @@ swarmweaver/                  # Project root (SwarmWeaver)
 │   ├── budget.py                 # Cost tracking and circuit breakers
 │   ├── mail.py                   # Inter-agent MailStore (SQLite; typed payloads, attachments, analytics, dead letters)
 │   └── events.py                 # EventStore (SQLite; tool calls, sessions, errors)
-├── features/                   # Steering, approval, GitHub, memory, plugins, spec workflow
+├── features/                   # Steering, approval, GitHub, plugins, spec workflow
 │   ├── steering.py               # Interactive mid-session steering
 │   ├── approval.py               # Task approval gates
 │   ├── verification.py           # Self-healing test verification loop
-│   ├── memory.py                 # Cross-project learning with domain-scoped priming
 │   ├── plugins.py                # Plugin system for custom hooks
 │   ├── github_integration.py     # GitHub PR automation
 │   ├── notifications.py          # Slack, Discord, generic webhook notifications
-│   ├── context_primer.py         # Smart context injection
-│   ├── project_expertise.py      # Project-local expertise store (.swarmweaver/expertise/)
+│   ├── context_primer.py         # Smart context injection (uses MELS PrimingEngine)
 │   ├── spec_workflow.py          # Spec-driven task workflow (create/read/list)
 │   └── task_tracker.py           # External task sync (GitHub Issues, Jira; abstract interface)
-├── services/                   # Events, templates, ADR, replay, insights, timeline, costs, monitor, watchdog
+├── services/                   # Events, templates, ADR, replay, insights, timeline, costs, monitor, watchdog, MELS
 │   ├── events.py                 # Structured event parser
 │   ├── insights.py               # Session insight analyzer
+│   ├── expertise_models.py       # MELS data models (10 record types, domain taxonomy, scoring)
+│   ├── expertise_store.py        # MELS SQLite store (CRUD, search, governance, session lessons)
+│   ├── expertise_scoring.py      # MELS confidence, decay, priming score
+│   ├── expertise_priming.py      # MELS token-budget-aware priming engine
+│   ├── expertise_synthesis.py    # MELS real-time session lesson synthesis
+│   ├── expertise_migration.py    # MELS migration from legacy JSON formats
 │   ├── templates.py              # Project template registry
 │   ├── schemas.py                # Pydantic models for structured output
 │   ├── subagents.py              # Subagent definitions (test-runner, reviewer, verifier, debugger)
@@ -251,7 +255,7 @@ Each session runs with a fresh context window. Progress persists through:
 - `.swarmweaver/feature_list.json` - Legacy task list (backward compatible, auto-generated)
 - `.swarmweaver/codebase_profile.json` - Analyzed project structure (for non-greenfield modes)
 - `.swarmweaver/security_report.json` - Security scan findings (security mode, reviewed by user before remediation)
-- `.swarmweaver/session_reflections.json` - Agent-written reflections, harvested into memory post-session
+- `.swarmweaver/session_reflections.json` - Agent-written reflections, harvested into MELS expertise post-session
 - `.swarmweaver/task_input.txt` - The user's feature/goal/issue description
 - Git commits - Incremental progress snapshots
 - `.swarmweaver/claude-progress.txt` - Session notes for context handoff
@@ -273,7 +277,7 @@ Decision logic in `main()` and server: `smart_swarm` → SmartSwarm; `parallel >
 | `autonomous_agent_demo.py` | Backward-compatible shim → `cli/main.py` |
 | `server.py` | Backward-compatible shim → `api/app.py` |
 | `core/paths.py` | Centralized artifact paths — all artifacts under `.swarmweaver/`, with legacy fallback |
-| `core/agent.py` | Multi-phase agent session loop with memory harvesting and reflection |
+| `core/agent.py` | Multi-phase agent session loop with MELS expertise harvesting |
 | `core/engine.py` | Execution engine: single-agent runs with SDK streaming |
 | `core/orchestrator.py` | SwarmOrchestrator: static N workers, worktree setup |
 | `core/smart_orchestrator.py` | SmartOrchestrator: AI-orchestrated dynamic workers |
@@ -292,7 +296,9 @@ Decision logic in `main()` and server: `smart_swarm` → SmartSwarm; `parallel >
 | `utils/safe_logging.py` | Fire-and-forget logging that never crashes the agent |
 | `hooks/security.py` | Bash command allowlist validation via `PreToolUse` hook |
 | `hooks/capability_hooks.py` | Role-based capability enforcement (scout/builder/reviewer/lead) |
-| `features/memory.py` | Cross-project learning with domain-scoped priming |
+| `services/expertise_store.py` | MELS cross-project + project-local SQLite expertise stores |
+| `services/expertise_priming.py` | MELS token-budget-aware priming engine for prompt injection |
+| `services/expertise_synthesis.py` | MELS real-time session lesson synthesis from worker errors |
 | `features/spec_workflow.py` | Spec-driven workflow: create/read/list specs per task |
 | `services/monitor.py` | Fleet health monitor: agent health analysis, mail issues, recommendations |
 | `services/timeline.py` | Cross-agent event timeline: merges events, mail, audit into one stream |
@@ -336,8 +342,8 @@ For **Swarm** (static N workers) with 3+ workers:
 ```
 prompts/
 ├── shared/              # Shared across all modes
-│   ├── session_start.md   # Common orientation steps + {agent_memory} injection
-│   ├── session_end.md     # Common cleanup steps + reflection/memory saving
+│   ├── session_start.md   # Common orientation steps + {agent_memory} MELS expertise injection
+│   ├── session_end.md     # Common cleanup steps + reflection saving (harvested into MELS)
 │   └── verification.md    # Common verification steps
 ├── greenfield/          # Build from spec
 │   ├── architect.md       # Architecture from idea (greenfield_from_idea mode)
@@ -418,8 +424,8 @@ Key endpoint categories:
 | Insights | `GET /api/insights` |
 | Timeline | `GET /api/timeline` |
 | Agents | `GET /api/agents`, `GET /api/agents/{name}`, `GET /api/subagents` |
-| Memory | `GET /api/memory`, `POST /api/memory`, `GET /api/memory/prime` |
-| Project expertise | `GET/POST /api/projects/expertise`, `DELETE /api/projects/expertise/{id}` |
+| Expertise (MELS) | `GET/POST /api/expertise`, `GET/PUT/DELETE /api/expertise/{id}`, `POST /api/expertise/{id}/outcome`, `GET /api/expertise/search`, `GET /api/expertise/prime`, `GET /api/expertise/causal-chain/{id}`, `GET/POST /api/expertise/domains`, `GET /api/expertise/analytics`, `GET /api/expertise/session-lessons`, `POST /api/expertise/migrate`, `POST /api/expertise/prune`, `GET /api/expertise/export` |
+| Project expertise | `GET/POST /api/projects/expertise`, `DELETE /api/projects/expertise/{id}` (delegates to MELS) |
 | Task sync | `POST /api/tasks/sync`, `GET /api/tasks/sync/status` |
 | Session chain | `GET /api/session/chain` |
 | Settings | `GET/POST /api/settings`, `GET/POST /api/projects/settings` |
@@ -444,7 +450,7 @@ All SwarmWeaver artifacts are consolidated under `.swarmweaver/` — delete it a
 │   ├── feature_list.json            # Legacy task list (auto-generated)
 │   ├── codebase_profile.json        # Analyzed project structure (non-greenfield)
 │   ├── security_report.json         # Security scan findings (security mode)
-│   ├── session_reflections.json     # Agent reflections (harvested into memory post-session)
+│   ├── session_reflections.json     # Agent reflections (harvested into MELS expertise post-session)
 │   ├── task_input.txt               # The feature/goal/issue description
 │   ├── app_spec.txt                 # Project specification (greenfield)
 │   ├── claude-progress.txt          # Session handoff notes
@@ -467,6 +473,7 @@ All SwarmWeaver artifacts are consolidated under `.swarmweaver/` — delete it a
 │   ├── runs/                        # Run history
 │   ├── chains/                      # Session chain data
 │   ├── mcp_servers.json              # Project-level MCP server config (merged with global)
+│   ├── expertise/expertise.db        # MELS project-local expertise store (SQLite)
 │   ├── mail.db                      # Inter-agent mail (typed payloads, attachments, dead letters, analytics)
 │   ├── events.db                    # Structured event store
 │   ├── watchdog.yaml                # Watchdog health monitor configuration
@@ -601,24 +608,44 @@ The `security` mode provides vulnerability scanning with human-in-the-loop revie
 - Scanner has an explicit **blocklist**: will not read `.swarmweaver/task_list.json`, `.swarmweaver/feature_list.json`, `.swarmweaver/claude-progress.txt`, or other project management artifacts
 - Human review step is mandatory — the agent cannot proceed to remediation without user approval
 
-### Cross-Project Memory System
+### Multi-Expertise Learning System (MELS)
 
-The memory system enables learning across projects through agent reflection and pattern harvesting.
+MELS is the unified knowledge engine that replaces all previous learning infrastructure (AgentMemory, ProjectExpertise, lessons.json). It provides typed, domain-hierarchical, governed expertise with real-time intra-session learning.
+
+**Architecture:**
+- **Cross-project store:** `~/.swarmweaver/expertise/expertise.db` (SQLite WAL) — knowledge shared across all projects
+- **Project-local store:** `.swarmweaver/expertise/expertise.db` — project-specific knowledge
+- **10 record types:** convention, pattern, failure, decision, reference, guide, resolution, insight, antipattern, heuristic
+- **3 classifications:** foundational (permanent), tactical (30d shelf life), observational (14d shelf life)
+- **Hierarchical domains:** `python.fastapi` inherits from `python`, auto-inferred from file paths
 
 **How it works:**
-1. `{agent_memory}` placeholder in `session_start.md` injects relevant memories into each session prompt
+1. `{agent_memory}` placeholder in `session_start.md` injects MELS-primed expertise via `PrimingEngine`
 2. `session_end.md` instructs the agent to write reflections to `.swarmweaver/session_reflections.json`
-3. Post-session harvester in `core/agent.py` reads `.swarmweaver/session_reflections.json`, validates entries, and imports them into `AgentMemory`
-4. Auto-saves success patterns when all tasks complete, error patterns on consecutive failures
+3. Post-session harvester in `core/agent.py` reads reflections and stores as typed `ExpertiseRecord` entries
+4. Auto-saves success/failure patterns with confidence scoring and decay
 
-**Domain-scoped priming:**
-- `features/memory.py` includes `infer_domains(files)` to map file paths to expertise domains
-- `get_priming_context(file_scope, domains)` returns formatted expertise blocks for prompt injection
-- `GET /api/memory/prime?files=&domains=` endpoint for frontend access
+**Real-time intra-session learning (Smart Swarm):**
+- `SessionLessonSynthesizer` records worker errors, detects clusters (2+ similar across workers)
+- Synthesized lessons are quality-gated (specificity + actionability >= 0.4)
+- High-quality lessons are propagated to active workers mid-session via steering messages
+- At session end, high-quality lessons are promoted to permanent `ExpertiseRecord` entries
 
-**Memory categories:** `pattern`, `mistake`, `solution`, `preference`
+**Key components:**
+- `services/expertise_models.py` — Data models, domain taxonomy, record types
+- `services/expertise_store.py` — SQLite store (CRUD, search, governance, session lessons)
+- `services/expertise_scoring.py` — Multi-signal confidence (success rate + recency + confirmation density)
+- `services/expertise_priming.py` — Token-budget-aware greedy knapsack selection for prompt injection
+- `services/expertise_synthesis.py` — Real-time lesson synthesis from worker error clusters
+- `api/routers/expertise.py` — 16 REST endpoints for the full expertise lifecycle
 
-**Storage:** `~/.swarmweaver/memory/memories.json`
+**Confidence scoring:** 50% success rate + 20% recency decay + 30% confirmation density. New records start at 0.5.
+
+**Priming:** `GET /api/expertise/prime?files=src/app.py&budget=2000` returns formatted expertise blocks
+
+**Causal chains:** Failure records can be linked to resolution records via `resolves`/`resolved_by` fields
+
+**WebSocket events:** `expertise_lesson_created`, `expertise_lesson_propagated`, `expertise_record_promoted`
 
 ### Multi-Session Tabbed UI
 

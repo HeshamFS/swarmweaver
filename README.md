@@ -15,7 +15,7 @@
 
 Point it at a spec, a codebase, or a bug report — it works autonomously across unlimited sessions until the job is done. Built for long-running autonomous sessions with audit trails, approval gates, and cost controls.
 
-**Key features:** Six operation modes (greenfield, feature, refactor, fix, evolve, security) · Web UI + CLI · Git worktree isolation · Multi-agent swarm with inter-agent mail · Enhanced watchdog health monitoring · Native LSP code intelligence (22 language servers) · Human-in-the-loop approval gates · Cross-project memory · MCP server integration
+**Key features:** Six operation modes (greenfield, feature, refactor, fix, evolve, security) · Web UI + CLI · Git worktree isolation · Multi-agent swarm with inter-agent mail · Enhanced watchdog health monitoring · Native LSP code intelligence (22 language servers) · Human-in-the-loop approval gates · MELS expertise system (cross-project learning with real-time intra-session lesson synthesis) · MCP server integration
 
 ## Table of Contents
 
@@ -95,7 +95,7 @@ SwarmWeaver is a Python harness that runs Claude as a long-running autonomous co
 
 ### Capabilities at a Glance
 
-All modes share cross-cutting capabilities: approval gates, worktree isolation, verification loop, cross-project memory, 4-tier merge resolution, and security allowlist.
+All modes share cross-cutting capabilities: approval gates, worktree isolation, verification loop, MELS expertise system, 4-tier merge resolution, and security allowlist.
 
 ```mermaid
 flowchart LR
@@ -116,7 +116,7 @@ flowchart LR
         C1[Approval Gates]
         C2[Worktree Isolation]
         C3[Verification Loop]
-        C4[Cross-Project Memory]
+        C4[MELS Expertise]
         C5[4-Tier Merge]
         C6[Security Allowlist]
     end
@@ -449,7 +449,7 @@ swarmweaver/
 │   └── state.py                   # App-level state (run registry, etc.)
 │
 ├── core/                        # Agent loop, orchestrators, merge, worktree
-│   ├── agent.py                   # Multi-phase session loop with memory harvesting
+│   ├── agent.py                   # Multi-phase session loop with MELS expertise harvesting
 │   ├── engine.py                  # Single-agent execution (SDK streaming)
 │   ├── orchestrator.py            # SwarmOrchestrator (static N workers)
 │   ├── smart_orchestrator.py      # SmartOrchestrator (AI-orchestrated dynamic workers)
@@ -481,12 +481,16 @@ swarmweaver/
 │   ├── steering.py                # Mid-session steering (instruction/reflect/abort)
 │   ├── approval.py                # Approval gates
 │   ├── verification.py            # Self-healing test verification loop
-│   ├── memory.py                  # Cross-project learning
 │   └── plugins.py                 # Custom hook plugins
 │
-├── services/                    # Shared helpers
+├── services/                    # Shared helpers + MELS expertise system
 │   ├── events.py                  # Structured event parser
 │   ├── insights.py                # Session analytics
+│   ├── expertise_models.py        # MELS data models (10 record types, domain taxonomy)
+│   ├── expertise_store.py         # MELS SQLite store (CRUD, search, governance)
+│   ├── expertise_scoring.py       # MELS confidence, decay, priming score
+│   ├── expertise_priming.py       # MELS token-budget-aware priming engine
+│   ├── expertise_synthesis.py     # MELS real-time lesson synthesis from worker errors
 │   ├── timeline.py                # Cross-agent event timeline
 │   ├── transcript_costs.py        # Transcript-based cost analysis
 │   ├── monitor.py                 # Fleet health monitor

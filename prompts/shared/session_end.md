@@ -27,7 +27,7 @@ Ensure `.swarmweaver/task_list.json` (or `.swarmweaver/feature_list.json`) is sa
 ### 4. Reflect & Save Learnings
 
 Before ending, reflect on this session and save what you learned to `.swarmweaver/session_reflections.json`.
-This file is automatically collected by the harness and saved to cross-project memory so future sessions benefit from your experience.
+This file is automatically collected by the harness and saved to the MELS expertise system so future sessions benefit from your experience.
 
 Write `.swarmweaver/session_reflections.json` with 1–5 entries:
 

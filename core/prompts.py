@@ -149,15 +149,20 @@ def build_prompt(
         "current_date": datetime.now().strftime("%B %d, %Y"),
         "project_dir": str(project_dir) if project_dir else ".",
         "context_prime": "",   # Populated by agent.py with ContextPrimer
-        "agent_memory": "",    # Populated by agent.py with AgentMemory
+        "agent_memory": "",    # Populated via MELS PrimingEngine
     }
 
-    # Load agent memory if available
+    # Load expertise context via MELS
     if project_dir:
         try:
-            from features.memory import AgentMemory
-            mem = AgentMemory()
-            memory_context = mem.get_relevant_context(task_input or "")
+            from services.expertise_priming import PrimingEngine
+            from services.expertise_store import get_cross_project_store
+            engine = PrimingEngine()
+            store = get_cross_project_store()
+            memory_context = engine.prime(
+                store, file_scope=[], domains=None,
+                task_description=task_input or "",
+            )
             if memory_context:
                 context["agent_memory"] = memory_context
         except Exception:

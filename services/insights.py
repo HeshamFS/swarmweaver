@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from features.memory import AgentMemory, FILE_DOMAIN_MAP
+from services.expertise_models import HIERARCHICAL_DOMAIN_MAP as FILE_DOMAIN_MAP
 
 
 @dataclass
@@ -58,7 +58,7 @@ class SessionInsightAnalyzer:
     Usage:
         analyzer = SessionInsightAnalyzer(project_dir)
         analysis = analyzer.analyze_audit_log()
-        count = analyzer.record_to_memory(analysis)
+        count = analyzer.record_to_expertise(analysis)
     """
 
     def __init__(self, project_dir: Path):
@@ -173,36 +173,43 @@ class SessionInsightAnalyzer:
 
         return insights
 
-    def record_to_memory(self, analysis: InsightAnalysis, project_source: str = "") -> int:
-        """Record session insights to the memory system."""
+    def record_to_expertise(self, analysis: InsightAnalysis, project_source: str = "") -> int:
+        """Record session insights as typed expertise records (MELS)."""
         if not analysis.insights:
             return 0
 
-        mem = AgentMemory()
+        import hashlib
+        from services.expertise_store import get_project_store
+        from services.expertise_models import ExpertiseRecord
+
+        store = get_project_store(self.project_dir)
+        type_map = {
+            "pattern": "pattern",
+            "convention": "convention",
+            "failure": "failure",
+            "decision": "decision",
+        }
         count = 0
         for insight in analysis.insights:
-            category_map = {
-                "pattern": "pattern",
-                "convention": "pattern",
-                "failure": "mistake",
-                "decision": "solution",
-            }
-            mem.add(
-                category=category_map.get(insight.insight_type, "pattern"),
-                content=insight.content,
-                tags=insight.tags,
-                project_source=project_source or str(self.project_dir.name),
+            record = ExpertiseRecord(
+                record_type=type_map.get(insight.insight_type, "pattern"),
+                classification="observational",
                 domain=insight.domain,
-                expertise_type=insight.insight_type,
+                content=insight.content,
+                source_project=project_source or str(self.project_dir.name),
+                source_agent="insight-analyzer",
+                tags=insight.tags,
+                content_hash=hashlib.sha256(insight.content.encode()).hexdigest(),
             )
+            store.add(record)
             count += 1
         return count
 
     def analyze_and_record(self, project_source: str = "") -> InsightAnalysis:
-        """Convenience: analyze session and record insights to memory."""
+        """Convenience: analyze session and record insights to MELS expertise store."""
         analysis = self.analyze_audit_log()
         if analysis.insights:
-            self.record_to_memory(analysis, project_source)
+            self.record_to_expertise(analysis, project_source)
         return analysis
 
 

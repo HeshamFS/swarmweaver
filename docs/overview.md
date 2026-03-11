@@ -37,7 +37,7 @@ All modes share these capabilities:
 - **Approval gates** — Pause the agent for human review at key checkpoints
 - **Worktree isolation** — Run in isolated git worktrees; merge or discard on completion
 - **Verification loop** — Self-healing test verification
-- **Cross-project memory** — Learn from past sessions and inject relevant patterns
+- **MELS expertise system** — Multi-Expertise Learning System with cross-project knowledge, real-time intra-session lesson synthesis, and token-budget-aware priming
 - **4-tier merge resolution** — Clean → auto → AI → reimagine for swarm conflicts
 - **Security allowlist** — Bash commands validated against an allowlist (~60+ commands)
 

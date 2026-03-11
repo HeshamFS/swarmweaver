@@ -647,6 +647,24 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
             const d = (msg.data || msg) as unknown as LspCrossWorkerAlert;
             d.timestamp = (msg.timestamp as string) || new Date().toISOString();
             setLspCrossWorkerAlerts((prev) => [d, ...prev].slice(0, 50));
+          } else if (msg.type === "expertise_lesson_propagated" || msg.type === "expertise_record_promoted" || msg.type === "expertise_lesson_created") {
+            // MELS expertise events — push to events feed for observability
+            const d = msg.data || msg;
+            setEvents((prev) => [
+              ...prev,
+              {
+                type: msg.type,
+                timestamp: (msg.timestamp as string) || new Date().toISOString(),
+                data: d as Record<string, unknown>,
+              } as AgentEvent,
+            ]);
+            // Also surface as output for terminal visibility
+            const label = msg.type === "expertise_lesson_propagated"
+              ? `[MELS] Lesson propagated to worker-${d.worker_id}: ${(d.content as string || "").slice(0, 80)}`
+              : msg.type === "expertise_record_promoted"
+              ? `[MELS] Lesson ${d.lesson_id} promoted to permanent record ${d.record_id}`
+              : `[MELS] New lesson: ${(d.content as string || "").slice(0, 100)}`;
+            setOutput((prev) => [...prev, label]);
           } else if (msg.type === "lsp.merge_validation") {
             const d = msg.data || msg;
             setEvents((prev) => [

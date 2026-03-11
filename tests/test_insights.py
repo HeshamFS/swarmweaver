@@ -4,9 +4,6 @@ Test Session Insight Analyzer (services/insights.py)
 
 Tests the SessionInsightAnalyzer class that extracts tool usage profiles,
 hot files, error patterns, and structured insights from audit.log files.
-
-Uses tmp_path for temporary audit logs and overrides HOME to isolate
-AgentMemory during record_to_memory tests.
 """
 
 import json
@@ -177,22 +174,11 @@ def test_generate_insights_detects_heavy_bash_usage(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# record_to_memory()
+# record_to_expertise()
 # ---------------------------------------------------------------------------
 
-def test_record_to_memory_saves_insights(tmp_path, monkeypatch):
-    """record_to_memory() writes insights to the AgentMemory store."""
-    # Redirect HOME so AgentMemory writes to tmp_path instead of real home
-    fake_home = tmp_path / "fakehome"
-    fake_home.mkdir()
-    monkeypatch.setenv("HOME", str(fake_home))
-
-    # Also patch the module-level paths in features.memory
-    import features.memory as mem_module
-    monkeypatch.setattr(mem_module, "MEMORY_DIR", fake_home / ".swarmweaver" / "memory")
-    monkeypatch.setattr(mem_module, "MEMORY_FILE", fake_home / ".swarmweaver" / "memory" / "memories.json")
-    monkeypatch.setattr(mem_module, "DOMAINS_DIR", fake_home / ".swarmweaver" / "memory" / "domains")
-
+def test_record_to_expertise_saves_insights(tmp_path, monkeypatch):
+    """record_to_expertise() writes insights to the MELS expertise store."""
     # Create an audit log with enough data to produce at least one insight
     entries = []
     for _ in range(15):
@@ -205,9 +191,5 @@ def test_record_to_memory_saves_insights(tmp_path, monkeypatch):
     analysis = analyzer.analyze_audit_log()
     assert len(analysis.insights) > 0
 
-    count = analyzer.record_to_memory(analysis, project_source="test-project")
+    count = analyzer.record_to_expertise(analysis, project_source="test-project")
     assert count > 0
-
-    # Verify memory files were created
-    memory_dir = fake_home / ".swarmweaver" / "memory"
-    assert memory_dir.exists()

@@ -465,13 +465,13 @@ class TestFailureRecording:
         )
         loop.close()
 
-        # Check that expertise was recorded
-        index_path = tmp_path / ".swarmweaver" / "expertise" / "index.json"
-        assert index_path.exists()
-        entries = json.loads(index_path.read_text())
-        assert len(entries) == 1
-        assert entries[0]["category"] == "failure"
-        assert "terminated" in entries[0]["content"].lower()
+        # Check that expertise was recorded in MELS SQLite store
+        from services.expertise_store import get_project_store
+        store = get_project_store(tmp_path)
+        records = store.search(query="terminated", limit=10)
+        assert len(records) >= 1
+        assert records[0].record_type == "failure"
+        assert "terminated" in records[0].content.lower()
 
     def test_fire_and_forget_on_error(self, tmp_path):
         """Should not crash even if expertise recording fails."""
@@ -479,7 +479,7 @@ class TestFailureRecording:
         wd.register_worker(1)
         h = wd.workers[1]
 
-        with patch("features.project_expertise.ProjectExpertise.add",
+        with patch("services.expertise_store.get_project_store",
                     side_effect=RuntimeError("write error")):
             loop = asyncio.new_event_loop()
             loop.run_until_complete(wd._record_failure(h, "test", {}))

@@ -162,7 +162,7 @@ Each target project gets a `.swarmweaver/` directory with session state and arti
 | `claude-progress.txt` | Session handoff notes |
 | `codebase_profile.json` | Analyzed project structure (non-greenfield) |
 | `security_report.json` | Security scan findings (security mode) |
-| `session_reflections.json` | Agent reflections (harvested into memory) |
+| `session_reflections.json` | Agent reflections (harvested into MELS expertise) |
 | `budget_state.json` | Cost tracking state |
 | `audit.log` | Tool execution log |
 | `agent_output.log` | Agent stdout capture |

@@ -14,8 +14,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from features.project_expertise import ProjectExpertise
-
 
 # Available roles and their base definition files
 AGENT_ROLES = {
@@ -395,22 +393,27 @@ def generate_enhanced_overlay(
     if not budget_context:
         budget_context = _get_budget_context(worktree_path)
 
-    # Enrich expertise_context with project-scoped expertise
+    # Enrich expertise_context with MELS priming engine (project-local store)
     try:
+        from services.expertise_priming import PrimingEngine
+        from services.expertise_store import get_project_store
         project_dir = Path(worktree_path)
-        proj_expertise = ProjectExpertise(project_dir)
-        if file_scope:
-            proj_entries = proj_expertise.get_for_file_scope(file_scope)
-        else:
-            proj_entries = proj_expertise.get_all()
-        if proj_entries:
-            proj_context = proj_expertise.to_context_string(proj_entries)
+        engine = PrimingEngine()
+        proj_store = get_project_store(project_dir)
+        primed = engine.prime(
+            proj_store,
+            file_scope=file_scope or [],
+            domains=None,
+            task_description=task_description if 'task_description' in dir() else "",
+            budget_tokens=1500,
+        )
+        if primed:
             if expertise_context:
-                expertise_context = expertise_context + "\n\n" + proj_context
+                expertise_context = expertise_context + "\n\n" + primed
             else:
-                expertise_context = proj_context
+                expertise_context = primed
     except Exception:
-        pass  # Non-fatal: project expertise not available
+        pass  # Non-fatal: MELS priming not available
 
     # Fill all placeholders
     rendered = template

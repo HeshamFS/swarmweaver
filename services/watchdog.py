@@ -1345,19 +1345,24 @@ Respond with ONLY the JSON object, no markdown fencing."""
                               triage_result: dict = None) -> None:
         """Record failure to .swarmweaver/expertise/ for future learning."""
         try:
-            from features.project_expertise import ProjectExpertise
-            expertise = ProjectExpertise(self.project_dir)
-            expertise.add(
-                content=(
-                    f"Worker {health.worker_id} ({health.role}) terminated: {reason}\n"
-                    f"Tasks: {health.assigned_task_ids}\n"
-                    f"Stall: {int(time.time() - health.last_output_time)}s\n"
-                    f"Triage: {triage_result.get('verdict') if triage_result else 'N/A'}"
-                ),
-                category="failure",
-                domain="swarm",
-                tags=["watchdog", "auto-recorded", f"role:{health.role}"],
+            import hashlib as _hashlib
+            from services.expertise_store import get_project_store
+            from services.expertise_models import ExpertiseRecord
+            store = get_project_store(self.project_dir)
+            content = (
+                f"Worker {health.worker_id} ({health.role}) terminated: {reason}\n"
+                f"Tasks: {health.assigned_task_ids}\n"
+                f"Stall: {int(time.time() - health.last_output_time)}s\n"
+                f"Triage: {triage_result.get('verdict') if triage_result else 'N/A'}"
             )
+            store.add(ExpertiseRecord(
+                record_type="failure",
+                classification="observational",
+                domain="swarm",
+                content=content,
+                tags=["watchdog", "auto-recorded", f"role:{health.role}"],
+                content_hash=_hashlib.sha256(content.encode()).hexdigest(),
+            ))
         except Exception:
             pass  # Fire-and-forget
 

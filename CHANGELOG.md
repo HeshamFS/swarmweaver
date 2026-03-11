@@ -24,7 +24,7 @@ Initial release of SwarmWeaver — an autonomous coding agent platform powered b
 - **CLI package** (`cli/`): Installable via `uv sync`, entry point `swarmweaver`; all six modes, `status`, `steer`, `logs`, `merge`, `checkpoint`, `init`; `--interactive`, `--json`, `--server`; connected mode via `SWARMWEAVER_URL`; global config at `~/.swarmweaver/config.toml`
 - **API package** (`api/`): FastAPI with 60+ REST endpoints, WebSocket (`/ws/run`, `/ws/architect`, `/ws/plan`, `/ws/wizard`); `server.py` backward-compatible shim
 - **Autonomous hooks**: Server, environment, file, and port management; marathon hooks (auto-commit, health, loop detection, resource monitoring); bash allowlist (~60+ commands); secret sanitizer
-- **Cross-project memory**: Agent reflections in `~/.swarmweaver/memory/memories.json`; domain-scoped priming; categories: pattern, mistake, solution, preference
+- **MELS expertise system**: Multi-Expertise Learning System with cross-project + project-local SQLite stores; 10 record types; hierarchical domain taxonomy; confidence scoring with decay; real-time intra-session lesson synthesis; causal failure-resolution chains; token-budget-aware priming; 16 REST endpoints
 - **Docker**: Multi-stage build, `docker-compose.yml` with volume mount and both auth methods
 
 [Unreleased]: https://github.com/HeshamFS/swarmweaver/compare/v1.0.0...HEAD

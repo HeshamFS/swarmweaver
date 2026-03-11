@@ -12,7 +12,6 @@ import type {
 } from "../hooks/useSwarmWeaver";
 import { DrawerSection } from "./drawer/DrawerSection";
 import { TaskGraph } from "./TaskGraph";
-import { MemoryPanel } from "./MemoryPanel";
 import { SwarmPanel } from "./SwarmPanel";
 import { LSPPanel } from "./LSPPanel";
 
@@ -136,12 +135,11 @@ export function DetailDrawer({
   const drawerRef = useRef<HTMLDivElement>(null);
 
   // Tab state — declared early so polling can be tab-conditional
-  const [activeDrawerTab, setActiveDrawerTab] = useState<"tasks" | "observe" | "memory" | "docs" | "swarm">("tasks");
+  const [activeDrawerTab, setActiveDrawerTab] = useState<"tasks" | "observe" | "expertise" | "docs" | "swarm">("tasks");
 
   // REST API polling — only poll endpoints relevant to the active tab
   const isObserveTab = isOpen && activeDrawerTab === "observe";
   const isDocsTab = isOpen && activeDrawerTab === "docs";
-  const isMemoryTab = isOpen && activeDrawerTab === "memory";
 
   // Budget is shared (status strip uses it) — poll always when open
   const { data: budgetData } = useApiPoll("budget", projectPath, isOpen, 15000);
@@ -162,8 +160,8 @@ export function DetailDrawer({
   // Docs tab polls
   const { data: checkpointsData } = useApiPoll("session-history", projectPath, isDocsTab, 15000);
   const { data: sessionChainData } = useApiPoll("session/chain", projectPath, isDocsTab, 15000);
-  // Memory tab polls
-  const { data: reflectionsData } = useApiPoll("reflections", projectPath, isMemoryTab, 20000);
+  // Observe tab — reflections poll (moved from old memory tab)
+  const { data: reflectionsData } = useApiPoll("reflections", projectPath, isObserveTab, 20000);
 
   // Worktree diff (only when worktree exists)
   const [worktreeDiffData, setWorktreeDiffData] = useState<{ diff: string; status?: { files_changed?: number } } | null>(null);
@@ -186,8 +184,8 @@ export function DetailDrawer({
   // Graph modal (full-size task dependency graph)
   const [graphModalOpen, setGraphModalOpen] = useState(false);
 
-  // Tabbed drawer: tasks | observe | memory | docs | swarm
-  const sectionToTab: Record<string, "tasks" | "observe" | "memory" | "docs" | "swarm"> = {
+  // Tabbed drawer: tasks | observe | expertise | docs | swarm
+  const sectionToTab: Record<string, "tasks" | "observe" | "expertise" | "docs" | "swarm"> = {
     tasks: "tasks",
     files: "observe",
     costs: "observe",
@@ -197,9 +195,12 @@ export function DetailDrawer({
     audit: "observe",
     profile: "observe",
     processes: "observe",
-    memory: "memory",
-    insights: "memory",
-    reflections: "memory",
+    insights: "observe",
+    reflections: "observe",
+    "expertise-records": "expertise",
+    "expertise-causal": "expertise",
+    "expertise-lessons": "expertise",
+    "expertise-analytics": "expertise",
     adrs: "docs",
     checkpoints: "docs",
     mail: "swarm",
@@ -216,6 +217,85 @@ export function DetailDrawer({
   const [adrData, setAdrData] = useState<{ adrs: { id: string; title: string; status: string; date: string }[] } | null>(null);
   // Git reset state
   const [resettingTo, setResettingTo] = useState<string | null>(null);
+
+  // Expertise state
+  const [expertiseRecords, setExpertiseRecords] = useState<ApiData[]>([]);
+  const [expertiseDomains, setExpertiseDomains] = useState<ApiData[]>([]);
+  const [expertiseAnalytics, setExpertiseAnalytics] = useState<ApiData | null>(null);
+  const [expertiseLoading, setExpertiseLoading] = useState(false);
+  const [expertiseCausalChain, setExpertiseCausalChain] = useState<ApiData | null>(null);
+  const [expertiseLessons, setExpertiseLessons] = useState<ApiData[]>([]);
+
+  const isExpertiseTab = isOpen && activeDrawerTab === "expertise";
+
+  const fetchExpertiseRecords = useCallback(() => {
+    if (!isExpertiseTab) return;
+    setExpertiseLoading(true);
+    const params = new URLSearchParams();
+    if (projectPath) params.set("project_dir", projectPath);
+    fetch(`/api/expertise?${params}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d) setExpertiseRecords(asArr(d.records)); })
+      .catch(() => {})
+      .finally(() => setExpertiseLoading(false));
+  }, [isExpertiseTab, projectPath]);
+
+  const fetchExpertiseDomains = useCallback(() => {
+    if (!isExpertiseTab) return;
+    const params = new URLSearchParams();
+    if (projectPath) params.set("project_dir", projectPath);
+    fetch(`/api/expertise/domains?${params}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d) setExpertiseDomains(asArr(d.domains)); })
+      .catch(() => {});
+  }, [isExpertiseTab, projectPath]);
+
+  const fetchExpertiseAnalytics = useCallback(() => {
+    if (!isExpertiseTab) return;
+    const params = new URLSearchParams();
+    if (projectPath) params.set("project_dir", projectPath);
+    fetch(`/api/expertise/analytics?${params}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d) setExpertiseAnalytics(d as ApiData); })
+      .catch(() => {});
+  }, [isExpertiseTab, projectPath]);
+
+  const fetchExpertiseLessons = useCallback(() => {
+    if (!isExpertiseTab) return;
+    const params = new URLSearchParams();
+    if (projectPath) params.set("project_dir", projectPath);
+    fetch(`/api/expertise/session-lessons?${params}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d) setExpertiseLessons(asArr(d.lessons)); })
+      .catch(() => {});
+  }, [isExpertiseTab, projectPath]);
+
+  const loadExpertiseCausalChain = useCallback((recordId: string) => {
+    const params = new URLSearchParams();
+    if (projectPath) params.set("project_dir", projectPath);
+    fetch(`/api/expertise/causal-chain/${recordId}?${params}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d) setExpertiseCausalChain(d as ApiData); })
+      .catch(() => {});
+  }, [projectPath]);
+
+  useEffect(() => {
+    if (isExpertiseTab) {
+      fetchExpertiseRecords();
+      fetchExpertiseDomains();
+      fetchExpertiseAnalytics();
+      fetchExpertiseLessons();
+    }
+  }, [isExpertiseTab, fetchExpertiseRecords, fetchExpertiseDomains, fetchExpertiseAnalytics, fetchExpertiseLessons]);
+
+  // Re-fetch lessons when a new expertise WS event arrives (so API data stays current)
+  const expertiseEventCount = useMemo(
+    () => events.filter((e) => e.type === "expertise_lesson_created").length,
+    [events]
+  );
+  useEffect(() => {
+    if (expertiseEventCount > 0) fetchExpertiseLessons();
+  }, [expertiseEventCount, fetchExpertiseLessons]);
 
   const fetchADRs = useCallback(() => {
     if (adrData || !projectPath) return;
@@ -560,7 +640,7 @@ export function DetailDrawer({
                 [
                   { key: "tasks", label: "Tasks", icon: "\u2611" },
                   { key: "observe", label: "Observe", icon: "\u25C6" },
-                  { key: "memory", label: "Memory", icon: "\u2261" },
+                  { key: "expertise", label: "Expertise", icon: "\u2261" },
                   { key: "docs", label: "Docs", icon: "\u2234" },
                   ...(isSwarmMode ? [{ key: "swarm", label: "Swarm", icon: "\u2302" }] : []),
                 ] as const
@@ -978,21 +1058,6 @@ export function DetailDrawer({
                   />
                 </div>
               </DrawerSection>
-              </>
-              )}
-
-              {/* ── Memory & Insights tab ── */}
-              {activeDrawerTab === "memory" && (
-              <>
-              <DrawerSection
-                title="Memory"
-                icon={<span className="text-xs font-mono">{"\u2261"}</span>}
-                defaultOpen={false}
-              >
-                <div className="min-h-[320px] -mx-2 -mb-2">
-                  <MemoryPanel projectDir={projectPath} />
-                </div>
-              </DrawerSection>
 
               <DrawerSection
                 title="Insights"
@@ -1057,13 +1122,320 @@ export function DetailDrawer({
                           <span className="text-[10px] font-mono text-[var(--color-accent)]">{asStr(r.category, "reflection")}</span>
                           {!!r.timestamp && <span className="text-[10px] font-mono text-[#555]">{formatTime(asStr(r.timestamp))}</span>}
                         </div>
-                        <p className="text-xs font-mono text-[#888] leading-relaxed">{rContent.slice(0, 200)}{rContent.length > 200 ? "…" : ""}</p>
+                        <p className="text-xs font-mono text-[#888] leading-relaxed">{rContent.slice(0, 200)}{rContent.length > 200 ? "\u2026" : ""}</p>
                       </div>
                       );
                     })}
                   </div>
                 ) : (
                   <p className="text-xs font-mono text-[#555]">No reflections yet</p>
+                )}
+              </DrawerSection>
+              </>
+              )}
+
+              {/* ── Expertise tab ── */}
+              {activeDrawerTab === "expertise" && (
+              <>
+              <DrawerSection
+                title="Records"
+                icon={<span className="text-xs font-mono">{"\u2261"}</span>}
+                count={expertiseRecords.length || undefined}
+                defaultOpen={true}
+                forceOpen={activeSection === "expertise-records" ? true : undefined}
+              >
+                {expertiseLoading ? (
+                  <p className="text-xs font-mono text-[#555]">Loading...</p>
+                ) : expertiseRecords.length > 0 ? (
+                  <div className="space-y-1.5 max-h-80 overflow-y-auto tui-scrollbar">
+                    {expertiseRecords.map((r: ApiData) => {
+                      const id = asStr(r.id);
+                      const recordType = asStr(r.record_type);
+                      const content = asStr(r.content);
+                      const domain = asStr(r.domain);
+                      const confidence = asNum(r.confidence);
+                      const classification = asStr(r.classification);
+                      const resolvedBy = asArr(r.resolved_by as unknown as ApiData[]);
+                      const resolves = asStr(r.resolves as unknown as string);
+                      const tags = Array.isArray(r.tags) ? r.tags as string[] : [];
+                      const typeColor = recordType === "failure" || recordType === "antipattern"
+                        ? "var(--color-error)"
+                        : recordType === "resolution" || recordType === "pattern"
+                        ? "var(--color-success)"
+                        : recordType === "convention" || recordType === "decision"
+                        ? "var(--color-accent)"
+                        : recordType === "heuristic" || recordType === "guide"
+                        ? "var(--color-warning)"
+                        : "#888";
+                      return (
+                        <div key={id} className="p-2 bg-[#121212] border border-[#222] border-l-2" style={{ borderLeftColor: typeColor }}>
+                          <div className="flex items-center gap-2 mb-0.5">
+                            <span className="text-[10px] font-mono px-1.5 py-0.5 border" style={{ color: typeColor, borderColor: typeColor + "50", backgroundColor: typeColor + "10" }}>
+                              {recordType}
+                            </span>
+                            <span className="text-[10px] font-mono text-[#555]">{classification}</span>
+                            <span className="ml-auto flex items-center gap-1">
+                              <span className="text-[10px] font-mono text-[#555]">{(confidence * 100).toFixed(0)}%</span>
+                              <span className="w-10 h-1 bg-[#222] rounded-full overflow-hidden inline-block">
+                                <span className={`h-full block rounded-full ${confidence >= 0.7 ? "bg-[var(--color-success)]" : confidence >= 0.4 ? "bg-[var(--color-warning)]" : "bg-[var(--color-error)]"}`} style={{ width: `${confidence * 100}%` }} />
+                              </span>
+                            </span>
+                          </div>
+                          <p className="text-xs font-mono text-[#E0E0E0] leading-relaxed">{content.slice(0, 200)}{content.length > 200 ? "\u2026" : ""}</p>
+                          <div className="flex items-center gap-2 mt-0.5 text-[10px] font-mono text-[#555]">
+                            {domain && <span className="text-[var(--color-accent)]">{domain}</span>}
+                            {resolvedBy.length > 0 && <span className="text-[var(--color-success)]">(resolved)</span>}
+                            {resolves && <span className="text-[var(--color-info)]">(fixes)</span>}
+                            {tags.length > 0 && <span>{tags.slice(0, 3).join(", ")}</span>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-xs font-mono text-[#555]">No expertise records yet</p>
+                )}
+              </DrawerSection>
+
+              <DrawerSection
+                title="Causal Chains"
+                icon={<span className="text-xs font-mono">{"\u2192"}</span>}
+                count={expertiseRecords.filter((r) => asStr(r.record_type) === "failure").length || undefined}
+                forceOpen={activeSection === "expertise-causal" ? true : undefined}
+              >
+                {(() => {
+                  const failures = expertiseRecords.filter((r) => asStr(r.record_type) === "failure");
+                  if (failures.length === 0) {
+                    return <p className="text-xs font-mono text-[#555]">No failure records — causal chains link failures to resolutions</p>;
+                  }
+                  return (
+                    <div className="space-y-1.5 max-h-64 overflow-y-auto tui-scrollbar">
+                      {failures.map((f) => {
+                        const fId = asStr(f.id);
+                        const fContent = asStr(f.content);
+                        const resolvedBy = asArr(f.resolved_by as unknown as ApiData[]);
+                        const chainData = expertiseCausalChain && asStr(expertiseCausalChain.root) === fId ? asArr(expertiseCausalChain.chain) : [];
+                        return (
+                          <div key={fId} className="p-2 bg-[#121212] border border-[#222] border-l-2 border-l-[var(--color-error)]">
+                            <div
+                              className="flex items-center gap-2 cursor-pointer"
+                              onClick={() => loadExpertiseCausalChain(fId)}
+                            >
+                              <span className="text-[var(--color-error)] text-xs font-mono shrink-0">!</span>
+                              <span className="text-xs font-mono text-[#E0E0E0] flex-1 truncate">{fContent}</span>
+                              {resolvedBy.length > 0 ? (
+                                <span className="text-[var(--color-success)] text-[10px] font-mono shrink-0">{resolvedBy.length} fix(es)</span>
+                              ) : (
+                                <span className="text-[var(--color-error)] text-[10px] font-mono shrink-0">unresolved</span>
+                              )}
+                            </div>
+                            {chainData.length > 1 && (
+                              <div className="mt-1.5 ml-4 border-l-2 border-[var(--color-success)]/30 pl-2 space-y-1">
+                                {chainData.slice(1).map((cr) => (
+                                  <div key={asStr(cr.id)} className="text-xs font-mono text-[var(--color-success)] flex items-center gap-1">
+                                    <span className="text-[10px]">{"\u2713"}</span>
+                                    <span className="truncate">{asStr(cr.content)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+              </DrawerSection>
+
+              <DrawerSection
+                title="Session Lessons"
+                icon={<span className="text-xs font-mono">{"\u26A1"}</span>}
+                count={expertiseLessons.length || events.filter((e) => e.type.startsWith("expertise_")).length || undefined}
+                onExpand={fetchExpertiseLessons}
+                forceOpen={activeSection === "expertise-lessons" ? true : undefined}
+              >
+                {(() => {
+                  // Merge API-fetched lessons + real-time WS events
+                  const lessonEvents = events.filter(
+                    (e) => e.type === "expertise_lesson_created" || e.type === "expertise_lesson_propagated" || e.type === "expertise_record_promoted"
+                  );
+                  // Build deduplicated list: API lessons first, then WS-only events
+                  const apiLessonIds = new Set(expertiseLessons.map((l) => String(l.id || "")));
+                  const wsOnlyEvents = lessonEvents.filter((ev) => !apiLessonIds.has(String(ev.data?.lesson_id || "")));
+
+                  if (expertiseLessons.length === 0 && wsOnlyEvents.length === 0) {
+                    return <p className="text-xs font-mono text-[#555]">No session lessons yet — lessons appear during swarm mode when workers encounter similar errors</p>;
+                  }
+                  const severityColor: Record<string, string> = {
+                    critical: "var(--color-error)",
+                    high: "var(--color-warning)",
+                    medium: "var(--color-accent)",
+                    low: "var(--color-text-muted)",
+                  };
+                  return (
+                    <div className="space-y-1.5 max-h-64 overflow-y-auto tui-scrollbar">
+                      {/* API-fetched lessons (persistent) */}
+                      {expertiseLessons.map((lesson, i) => {
+                        const sev = String(lesson.severity || "low");
+                        const sevColor = severityColor[sev] || "var(--color-text-muted)";
+                        const score = Number(lesson.quality_score || 0);
+                        const propagated = Array.isArray(lesson.propagated_to) ? lesson.propagated_to : [];
+                        return (
+                          <div key={`api-${String(lesson.id || i)}`} className="p-2 bg-[#121212] border border-[#222] border-l-2" style={{ borderLeftColor: sevColor }}>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] font-mono px-1.5 py-0.5 border" style={{ color: sevColor, borderColor: sevColor + "50", backgroundColor: sevColor + "10" }}>
+                                {sev.toUpperCase()}
+                              </span>
+                              {Boolean(lesson.promoted_to_record_id) && (
+                                <span className="text-[10px] font-mono px-1.5 py-0.5 border" style={{ color: "var(--color-success)", borderColor: "var(--color-success)" + "50" }}>
+                                  PROMOTED
+                                </span>
+                              )}
+                              <span className="text-xs font-mono text-[#E0E0E0] flex-1 truncate">
+                                {String(lesson.content || "")}
+                              </span>
+                            </div>
+                            <div className="text-[10px] font-mono text-[#555] mt-0.5 flex gap-2">
+                              {Boolean(lesson.domain) && <span>domain: {String(lesson.domain)}</span>}
+                              <span>quality: {score.toFixed(2)}</span>
+                              {propagated.length > 0 && <span>sent to {propagated.length} worker(s)</span>}
+                              {Boolean(lesson.created_at) && <span>{String(lesson.created_at).slice(0, 19)}</span>}
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {/* WS-only events (real-time, not yet in API) */}
+                      {wsOnlyEvents.map((ev, i) => {
+                        const label = ev.type === "expertise_lesson_propagated" ? "PROP" : ev.type === "expertise_record_promoted" ? "PERM" : "NEW";
+                        const labelColor = ev.type === "expertise_record_promoted"
+                          ? "var(--color-success)"
+                          : ev.type === "expertise_lesson_propagated"
+                          ? "var(--color-info)"
+                          : "var(--color-warning)";
+                        return (
+                          <div key={`ws-${i}`} className="p-2 bg-[#121212] border border-[#222] border-l-2" style={{ borderLeftColor: labelColor }}>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] font-mono px-1.5 py-0.5 border" style={{ color: labelColor, borderColor: labelColor + "50", backgroundColor: labelColor + "10" }}>
+                                {label}
+                              </span>
+                              <span className="text-xs font-mono text-[#E0E0E0] flex-1 truncate">
+                                {(ev.data?.content as string) || (ev.data?.lesson_id as string) || ""}
+                              </span>
+                            </div>
+                            <div className="text-[10px] font-mono text-[#555] mt-0.5">
+                              {formatTime(ev.timestamp)}
+                              {ev.data?.worker_id != null && ` | worker-${String(ev.data.worker_id)}`}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+              </DrawerSection>
+
+              <DrawerSection
+                title="Analytics"
+                icon={<span className="text-xs font-mono">{"\u2606"}</span>}
+                onExpand={fetchExpertiseAnalytics}
+                forceOpen={activeSection === "expertise-analytics" ? true : undefined}
+              >
+                {expertiseAnalytics ? (
+                  (() => {
+                    const totalRecords = asNum(expertiseAnalytics.total_records);
+                    const byType: Record<string, number> = (expertiseAnalytics.by_type as Record<string, number>) || {};
+                    const domainHealth = asArr(expertiseAnalytics.domain_health);
+                    const topRecords = asArr(expertiseAnalytics.top_records);
+                    const typeEntries = Object.entries(byType);
+                    return (
+                  <div className="space-y-3">
+                    {/* Summary row */}
+                    <div className="flex gap-3">
+                      <div className="flex items-center justify-between flex-1">
+                        <span className="text-xs font-mono text-[#555]">Total Records</span>
+                        <span className="text-sm font-mono font-bold text-[#E0E0E0]">{totalRecords}</span>
+                      </div>
+                      <div className="flex items-center justify-between flex-1">
+                        <span className="text-xs font-mono text-[#555]">Types</span>
+                        <span className="text-sm font-mono font-bold text-[#E0E0E0]">{typeEntries.length}</span>
+                      </div>
+                      <div className="flex items-center justify-between flex-1">
+                        <span className="text-xs font-mono text-[#555]">Domains</span>
+                        <span className="text-sm font-mono font-bold text-[#E0E0E0]">{domainHealth.length}</span>
+                      </div>
+                    </div>
+                    {/* By type breakdown */}
+                    {typeEntries.length > 0 && (
+                      <div>
+                        <span className="text-[10px] font-mono text-[#555] uppercase tracking-wider block mb-1">By Type</span>
+                        <div className="space-y-0.5">
+                          {typeEntries.map(([type, count]) => (
+                            <div key={type} className="flex justify-between text-[10px] font-mono">
+                              <span className="text-[#888]">{type}</span>
+                              <span className="text-[var(--color-accent)] shrink-0 ml-2">{String(count)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {/* Domain health */}
+                    {domainHealth.length > 0 && (
+                      <div className="pt-2 border-t border-[#222]">
+                        <span className="text-[10px] font-mono text-[#555] uppercase tracking-wider block mb-1">Domain Health</span>
+                        <div className="space-y-0.5">
+                          {domainHealth.map((d: ApiData) => (
+                            <div key={asStr(d.domain)} className="flex justify-between text-[10px] font-mono">
+                              <span className="text-[#888]">{asStr(d.domain)}</span>
+                              <span className={`shrink-0 ml-2 ${
+                                asStr(d.status) === "critical" ? "text-[var(--color-error)]" :
+                                asStr(d.status) === "warning" ? "text-[var(--color-warning)]" :
+                                "text-[#555]"
+                              }`}>
+                                {asNum(d.count)} ({asStr(d.status)})
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {/* Top records */}
+                    {topRecords.length > 0 && (
+                      <div className="pt-2 border-t border-[#222]">
+                        <span className="text-[10px] font-mono text-[#555] uppercase tracking-wider block mb-1">Top by Confidence</span>
+                        <div className="space-y-0.5">
+                          {topRecords.map((tr: ApiData) => (
+                            <div key={asStr(tr.id)} className="flex items-center gap-2 text-[10px] font-mono">
+                              <span className="text-[var(--color-accent)] shrink-0">{(asNum(tr.confidence) * 100).toFixed(0)}%</span>
+                              <span className="text-[#888] truncate flex-1">{asStr(tr.content)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                    );
+                  })()
+                ) : (
+                  <p className="text-xs font-mono text-[#555]">Expand to load analytics...</p>
+                )}
+              </DrawerSection>
+
+              <DrawerSection
+                title="Domains"
+                icon={<span className="text-xs font-mono">{"\u2302"}</span>}
+                count={expertiseDomains.length || undefined}
+              >
+                {expertiseDomains.length > 0 ? (
+                  <div className="space-y-0.5">
+                    {expertiseDomains.map((d: ApiData) => (
+                      <div key={asStr(d.name)} className="flex justify-between text-[10px] font-mono py-0.5">
+                        <span className="text-[var(--color-accent)]">{asStr(d.name)}</span>
+                        <span className="text-[#555]">{asNum(d.count)} records</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs font-mono text-[#555]">No domains configured</p>
                 )}
               </DrawerSection>
               </>

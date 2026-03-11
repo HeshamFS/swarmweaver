@@ -347,7 +347,7 @@ class SwarmOrchestrator:
         self.mail.close()
         import shutil
         if self.swarm_dir.exists():
-            _preserve = {"lessons.json", "mail.db", "merge_queue.db", "merge_history.json"}
+            _preserve = {"mail.db", "merge_queue.db", "merge_history.json"}
             for child in self.swarm_dir.iterdir():
                 if child.name in _preserve:
                     continue

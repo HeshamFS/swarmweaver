@@ -28,7 +28,7 @@
 | Watchdog health monitoring | `services/watchdog.py` (state machine, AI triage, circuit breaker, event store) |
 | LSP code intelligence | `services/lsp_client.py`, `lsp_manager.py`, `lsp_intelligence.py`, `lsp_tools.py`, `hooks/lsp_hooks.py` |
 | State persistence (tasks, sessions, budget) | `state/` (task_list.py, session_state.py, budget.py, mail.py, events.py) |
-| Mode capabilities (steering, memory, verification) | `features/` (steering.py, memory.py, verification.py, approval.py) |
+| Mode capabilities (steering, verification) | `features/` (steering.py, verification.py, approval.py) |
 | API endpoints and models | `api/` (routers/, models.py, app.py) |
 | Web UI components | `frontend/app/components/` |
 
@@ -60,7 +60,7 @@
 - Enhanced watchdog health monitoring: 9-state forward-only state machine, 7-signal health evaluation (including LSP diagnostic trend), active heartbeat protocol, LLM-based AI triage with heuristic fallback, dependency-aware escalation, circuit breaker, per-worker resource monitoring, persistent SQLite event log, YAML-configurable thresholds (`swarmweaver watchdog` CLI)
 - Native LSP code intelligence: 22 built-in language servers (auto-detect/install), per-worktree isolation, post-edit diagnostic injection, cross-worker diagnostic routing via mail, impact analysis, unused code detection, dependency graph, code health score, 13 REST endpoints, 5 CLI commands (`swarmweaver lsp`)
 - Approval gates, verification loop, security allowlist
-- Cross-project memory, budget tracking, cost analysis
+- MELS expertise system (cross-project + project-local, real-time lesson synthesis), budget tracking, cost analysis
 - Inter-agent mail system: typed payloads, context injection, attachments, dead letter queue, analytics (`swarmweaver mail` CLI)
 - User-configurable MCP servers (global + per-project) with built-in puppeteer and web search
 - Chat wizard flow with streaming (QA, architect, plan, security review)

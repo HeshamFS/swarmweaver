@@ -907,18 +907,27 @@ async def run_autonomous_agent(
         except Exception as e:
             print(f"\n[GITHUB] Auto-PR error (non-fatal): {e}")
 
-    # --- Harvest session reflections for cross-project memory ---
+    # --- Harvest session reflections into MELS expertise store ---
 
     budget_final = budget_tracker.get_status()
 
     try:
-        from features.memory import AgentMemory
         import json as _json
+        import hashlib as _hashlib
+        from services.expertise_store import get_cross_project_store, get_project_store
+        from services.expertise_models import ExpertiseRecord, Outcome, infer_domain
 
-        mem = AgentMemory()
+        cross_store = get_cross_project_store()
+        proj_store = get_project_store(project_dir)
         reflections_file = paths.session_reflections
 
-        # 1. Harvest agent-written reflections (if the agent saved any)
+        # Category -> record_type mapping
+        _CAT_MAP = {
+            "pattern": "pattern", "mistake": "failure",
+            "solution": "resolution", "preference": "convention",
+        }
+
+        # 1. Harvest agent-written reflections as typed ExpertiseRecords
         if reflections_file.exists():
             try:
                 reflections = _json.loads(reflections_file.read_text(encoding="utf-8"))
@@ -928,35 +937,60 @@ async def run_autonomous_agent(
                         if not isinstance(entry, dict) or not entry.get("content"):
                             continue
                         category = entry.get("category", "pattern")
-                        if category not in ("pattern", "mistake", "solution", "preference"):
-                            category = "pattern"
+                        record_type = _CAT_MAP.get(category, "pattern")
+                        content = entry["content"]
                         tags = entry.get("tags", [])
                         if mode not in tags:
                             tags.append(mode)
-                        mem.add(
-                            category,
-                            entry["content"],
+                        domain = entry.get("domain", "")
+                        if not domain:
+                            # Infer from content keywords
+                            for kw, d in [("python", "python"), ("typescript", "typescript"),
+                                          ("react", "typescript.react"), ("test", "testing"),
+                                          ("docker", "devops.docker"), ("api", "architecture.api")]:
+                                if kw in content.lower():
+                                    domain = d
+                                    break
+
+                        record = ExpertiseRecord(
+                            record_type=record_type,
+                            classification="tactical",
+                            domain=domain,
+                            content=content,
+                            source_project=str(project_dir),
+                            source_agent="session-agent",
                             tags=tags,
-                            project_source=str(project_dir),
+                            content_hash=_hashlib.sha256(content.encode()).hexdigest(),
                         )
+                        proj_store.add(record)
+                        cross_store.add(record)
                         saved_count += 1
                     if saved_count > 0:
-                        print(f"[MEMORY] Saved {saved_count} reflection(s) to cross-project memory")
-                # Clean up the reflections file so it's not re-harvested
+                        print(f"[MELS] Saved {saved_count} reflection(s) to expertise stores")
                 reflections_file.unlink(missing_ok=True)
             except (_json.JSONDecodeError, OSError) as e:
-                print(f"[MEMORY] Could not parse session_reflections.json: {e}")
+                print(f"[MELS] Could not parse session_reflections.json: {e}")
 
-        # 2. Auto-save error pattern if session had consecutive errors
+        # Mode to domain heuristic
+        _MODE_DOMAIN = {
+            "greenfield": "", "feature": "", "refactor": "",
+            "fix": "", "evolve": "", "security": "architecture.api",
+        }
+
+        # 2. Auto-save error pattern as failure record
         if budget_final["consecutive_errors"] > 0:
-            mem.add(
-                "mistake",
-                f"Session ended with {budget_final['consecutive_errors']} consecutive errors in {mode} mode",
+            content = f"Session ended with {budget_final['consecutive_errors']} consecutive errors in {mode} mode"
+            proj_store.add(ExpertiseRecord(
+                record_type="failure",
+                classification="observational",
+                domain=_MODE_DOMAIN.get(mode, ""),
+                content=content,
+                source_project=str(project_dir),
                 tags=[mode, "errors"],
-                project_source=str(project_dir),
-            )
+                content_hash=_hashlib.sha256(content.encode()).hexdigest(),
+            ))
 
-        # 3. Auto-save success pattern if all tasks completed
+        # 3. Auto-save success pattern
         if not _has_pending_tasks(project_dir) and budget_final["session_count"] > 0:
             tl_path = paths.resolve_read("task_list.json")
             if tl_path.exists():
@@ -965,20 +999,27 @@ async def run_autonomous_agent(
                     tl.load()
                     done_count = len([t for t in tl.tasks if t.status == "done"])
                     if done_count > 0:
-                        mem.add(
-                            "pattern",
+                        content = (
                             f"Successfully completed all {done_count} tasks in {mode} mode "
                             f"across {budget_final['session_count']} sessions "
-                            f"(${budget_final['estimated_cost_usd']:.4f})",
-                            tags=[mode, "completed", "success"],
-                            project_source=str(project_dir),
+                            f"(${budget_final['estimated_cost_usd']:.4f})"
                         )
-                        print(f"[MEMORY] Saved completion pattern ({done_count} tasks, {mode} mode)")
+                        proj_store.add(ExpertiseRecord(
+                            record_type="pattern",
+                            classification="tactical",
+                            domain=_MODE_DOMAIN.get(mode, ""),
+                            content=content,
+                            source_project=str(project_dir),
+                            tags=[mode, "completed", "success"],
+                            content_hash=_hashlib.sha256(content.encode()).hexdigest(),
+                        ))
+                        print(f"[MELS] Saved completion pattern ({done_count} tasks, {mode} mode)")
                 except Exception:
                     pass
 
-        # 4. Auto-save error→resolution patterns for tasks that were retried
+        # 4. Error→resolution patterns as linked failure + resolution records
         try:
+            from services.expertise_models import infer_domain as _infer_domain
             tl_retry = TaskList(project_dir)
             tl_retry.load()
             retry_count = 0
@@ -986,65 +1027,125 @@ async def run_autonomous_agent(
                 if (task.status == "done"
                         and getattr(task, "verification_attempts", 0) > 0
                         and getattr(task, "last_verification_error", "")):
-                    mem.add(
-                        "solution",
-                        f"[{mode}] Task '{task.title}' failed {task.verification_attempts}x "
-                        f"with: {task.last_verification_error[:150]}. "
-                        f"Eventually resolved after rework.",
+                    # Infer domain from task file scope
+                    task_domain = ""
+                    for fp in getattr(task, "file_scope", []) or []:
+                        d = _infer_domain(fp)
+                        if d:
+                            task_domain = d
+                            break
+
+                    # Create failure record
+                    fail_content = f"[{mode}] Task '{task.title}' failed with: {task.last_verification_error[:150]}"
+                    fail_record = ExpertiseRecord(
+                        record_type="failure",
+                        classification="observational",
+                        domain=task_domain,
+                        content=fail_content,
+                        source_project=str(project_dir),
                         tags=[mode, "error-resolution"],
-                        project_source=str(project_dir),
+                        file_patterns=getattr(task, "file_scope", []) or [],
+                        content_hash=_hashlib.sha256(fail_content.encode()).hexdigest(),
                     )
+                    fail_id = proj_store.add(fail_record)
+
+                    # Create linked resolution record
+                    res_content = f"[{mode}] Task '{task.title}' eventually resolved after {task.verification_attempts} attempts"
+                    res_record = ExpertiseRecord(
+                        record_type="resolution",
+                        classification="tactical",
+                        domain=task_domain,
+                        content=res_content,
+                        source_project=str(project_dir),
+                        resolves=fail_id,
+                        tags=[mode, "error-resolution"],
+                        file_patterns=getattr(task, "file_scope", []) or [],
+                        content_hash=_hashlib.sha256(res_content.encode()).hexdigest(),
+                    )
+                    proj_store.add(res_record)
                     retry_count += 1
             if retry_count > 0:
-                print(f"[MEMORY] Saved {retry_count} error→resolution pattern(s)")
+                print(f"[MELS] Saved {retry_count} error→resolution chain(s)")
         except Exception as e:
-            print(f"[MEMORY] Error→resolution save failed: {e}")
+            print(f"[MELS] Error→resolution save failed: {e}")
 
-        # 5. Track outcomes for previously applied memories
+        # 5. Track outcomes for records that were primed into this session
         try:
-            relevant = mem.search(task_input or mode, limit=5)
+            relevant = cross_store.search(query=task_input or mode, limit=5)
             if relevant:
                 all_done = not _has_pending_tasks(project_dir)
                 had_errors = budget_final.get("consecutive_errors", 0) > 2
-                for entry in relevant:
-                    if all_done:
-                        mem.record_outcome(entry.id, "success")
-                    elif had_errors:
-                        mem.record_outcome(entry.id, "partial")
+                for rec in relevant:
+                    status = "success" if all_done else ("partial" if had_errors else None)
+                    if status:
+                        cross_store.record_outcome(rec.id, Outcome(
+                            record_id=rec.id,
+                            status=status,
+                            agent="session-agent",
+                            project=str(project_dir),
+                        ))
         except Exception as e:
-            print(f"[MEMORY] Outcome tracking failed: {e}")
+            print(f"[MELS] Outcome tracking failed: {e}")
 
         # 6. Auto-detect project conventions from audit log
         try:
             if not _has_pending_tasks(project_dir):
-                from features.project_expertise import ProjectExpertise
-                proj_exp = ProjectExpertise(project_dir)
                 audit_path = paths.audit_log
                 if audit_path.exists():
                     audit_text = audit_path.read_text(encoding="utf-8", errors="ignore")[:50000]
                     detections = [
-                        ("pytest", "Uses pytest for testing", "testing"),
-                        ("jest", "Uses Jest for testing", "testing"),
-                        ("vitest", "Uses Vitest for testing", "testing"),
-                        ("fastapi", "Uses FastAPI framework", "python"),
-                        ("django", "Uses Django framework", "python"),
-                        ("next build", "Uses Next.js", "frontend"),
-                        ("vite build", "Uses Vite bundler", "frontend"),
-                        ("tailwindcss", "Uses Tailwind CSS", "frontend"),
+                        ("pytest", "Uses pytest for testing", "python.testing"),
+                        ("jest", "Uses Jest for testing", "typescript.testing"),
+                        ("vitest", "Uses Vitest for testing", "typescript.testing"),
+                        ("fastapi", "Uses FastAPI framework", "python.fastapi"),
+                        ("django", "Uses Django framework", "python.django"),
+                        ("next build", "Uses Next.js", "typescript.nextjs"),
+                        ("vite build", "Uses Vite bundler", "javascript"),
+                        ("tailwindcss", "Uses Tailwind CSS", "styling"),
                     ]
                     audit_lower = audit_text.lower()
                     det_count = 0
                     for keyword, desc, domain in detections:
                         if keyword in audit_lower:
-                            proj_exp.add(desc, "convention", domain, [mode])
+                            proj_store.add(ExpertiseRecord(
+                                record_type="convention",
+                                classification="foundational",
+                                domain=domain,
+                                content=desc,
+                                source_project=str(project_dir),
+                                tags=[mode, "auto-detected"],
+                                content_hash=_hashlib.sha256(desc.encode()).hexdigest(),
+                            ))
                             det_count += 1
                     if det_count > 0:
-                        print(f"[PROJECT-EXPERTISE] Auto-detected {det_count} convention(s)")
+                        print(f"[MELS] Auto-detected {det_count} convention(s)")
         except Exception as e:
-            print(f"[PROJECT-EXPERTISE] Auto-detect failed: {e}")
+            print(f"[MELS] Convention auto-detect failed: {e}")
+
+        # 7. Cross-project insight detection: check for 3+ similar records across projects
+        try:
+            all_records = cross_store.search(limit=100)
+            # Group by content_hash prefix for similarity
+            by_hash: dict[str, list] = {}
+            for rec in all_records:
+                if rec.content_hash:
+                    prefix = rec.content_hash[:8]
+                    by_hash.setdefault(prefix, []).append(rec)
+
+            for _prefix, group in by_hash.items():
+                projects = set(r.source_project for r in group if r.source_project)
+                if len(projects) >= 3 and group[0].classification != "foundational":
+                    # Promote to foundational insight
+                    cross_store.update(
+                        group[0].id,
+                        classification="foundational",
+                        record_type="insight",
+                    )
+        except Exception:
+            pass
 
     except Exception as e:
-        print(f"[MEMORY] Reflection harvest error (non-fatal): {e}")
+        print(f"[MELS] Reflection harvest error (non-fatal): {e}")
 
     # --- Auto-harvest session insights from audit log ---
     _session_analysis = None
@@ -1054,41 +1155,23 @@ async def run_autonomous_agent(
         analysis = analyzer.analyze_audit_log()
         _session_analysis = analysis
         if analysis.insights:
-            count = analyzer.record_to_memory(analysis, project_source=str(project_dir))
+            count = analyzer.record_to_expertise(analysis, project_source=str(project_dir))
             if count > 0:
-                print(f"[INSIGHTS] Auto-harvested {count} insight(s) from session "
+                print(f"[MELS] Auto-harvested {count} insight(s) from session "
                       f"({analysis.total_tool_calls} tool calls, {analysis.error_frequency} errors)")
     except Exception:
-        pass
-
-    # --- Harvest insights into project-scoped expertise ---
-    try:
-        from features.project_expertise import ProjectExpertise
-        proj_expertise = ProjectExpertise(project_dir)
-        pe_reflections = paths.session_reflections
-        if pe_reflections.exists():
-            import json as _json_pe
-            pe_data = _json_pe.loads(pe_reflections.read_text(encoding="utf-8"))
-            if isinstance(pe_data, list):
-                pe_count = 0
-                for pe_entry in pe_data:
-                    if not isinstance(pe_entry, dict) or not pe_entry.get("content"):
-                        continue
-                    pe_cat = pe_entry.get("category", "pattern")
-                    if pe_cat not in ("convention", "pattern", "failure", "decision", "reference"):
-                        pe_cat = "pattern"
-                    proj_expertise.add(
-                        content=pe_entry["content"],
-                        category=pe_cat,
-                        domain=pe_entry.get("domain", ""),
-                        tags=pe_entry.get("tags", []),
-                        source_file=pe_entry.get("source_file", ""),
-                    )
-                    pe_count += 1
-                if pe_count > 0:
-                    print(f"[PROJECT-EXPERTISE] Harvested {pe_count} entry(ies) into project knowledge base")
-    except Exception as e:
-        print(f"[PROJECT-EXPERTISE] Harvest error (non-fatal): {e}")
+        # Fallback to legacy insights recording
+        try:
+            from services.insights import SessionInsightAnalyzer
+            analyzer = SessionInsightAnalyzer(project_dir)
+            analysis = analyzer.analyze_audit_log()
+            _session_analysis = analysis
+            if analysis.insights:
+                count = analyzer.record_to_expertise(analysis, project_source=str(project_dir))
+                if count > 0:
+                    print(f"[INSIGHTS] Auto-harvested {count} insight(s)")
+        except Exception:
+            pass
 
     # --- Update main agent identity with final stats ---
     try:

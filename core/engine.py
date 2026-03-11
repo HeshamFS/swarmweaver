@@ -1025,11 +1025,13 @@ class Engine:
         """Post-session cleanup: memory harvesting, insights, identity update."""
         budget_final = ctx.budget_tracker.get_status()
 
-        # Harvest session reflections
+        # Harvest session reflections into MELS expertise store
         try:
-            from features.memory import AgentMemory
+            import hashlib as _hashlib
+            from services.expertise_store import get_cross_project_store
+            from services.expertise_models import ExpertiseRecord
 
-            mem = AgentMemory()
+            store = get_cross_project_store()
             reflections_file = ctx.paths.session_reflections
 
             if reflections_file.exists():
@@ -1038,41 +1040,51 @@ class Engine:
                         reflections_file.read_text(encoding="utf-8")
                     )
                     if isinstance(reflections, list):
-                        saved_count = 0
+                        category_to_type = {
+                            "pattern": "pattern", "mistake": "failure",
+                            "solution": "resolution", "preference": "convention",
+                        }
+                        from services.expertise_models import infer_domain as _infer_domain
                         for entry in reflections:
                             if not isinstance(entry, dict) or not entry.get("content"):
                                 continue
                             category = entry.get("category", "pattern")
-                            if category not in (
-                                "pattern",
-                                "mistake",
-                                "solution",
-                                "preference",
-                            ):
-                                category = "pattern"
                             tags = entry.get("tags", [])
                             if self.mode not in tags:
                                 tags.append(self.mode)
-                            mem.add(
-                                category,
-                                entry["content"],
+                            # Infer domain from content keywords
+                            domain = entry.get("domain", "")
+                            if not domain:
+                                for kw, d in [("python", "python"), ("typescript", "typescript"),
+                                              ("react", "typescript.react"), ("test", "testing"),
+                                              ("docker", "devops.docker"), ("api", "architecture.api")]:
+                                    if kw in entry["content"].lower():
+                                        domain = d
+                                        break
+                            store.add(ExpertiseRecord(
+                                record_type=category_to_type.get(category, "pattern"),
+                                classification="tactical",
+                                domain=domain,
+                                content=entry["content"],
+                                source_project=str(self.project_dir),
                                 tags=tags,
-                                project_source=str(self.project_dir),
-                            )
-                            saved_count += 1
+                                content_hash=_hashlib.sha256(entry["content"].encode()).hexdigest(),
+                            ))
                         reflections_file.unlink(missing_ok=True)
                 except (json.JSONDecodeError, OSError):
                     pass
 
             # Auto-save error pattern if session had consecutive errors
             if budget_final["consecutive_errors"] > 0:
-                mem.add(
-                    "mistake",
-                    f"Session ended with {budget_final['consecutive_errors']} "
-                    f"consecutive errors in {self.mode} mode",
+                content = (f"Session ended with {budget_final['consecutive_errors']} "
+                           f"consecutive errors in {self.mode} mode")
+                store.add(ExpertiseRecord(
+                    record_type="failure", classification="observational",
+                    domain="", content=content,
+                    source_project=str(self.project_dir),
                     tags=[self.mode, "errors"],
-                    project_source=str(self.project_dir),
-                )
+                    content_hash=_hashlib.sha256(content.encode()).hexdigest(),
+                ))
 
             # Auto-save success pattern
             if not _has_pending_tasks(self.project_dir) and budget_final["session_count"] > 0:
@@ -1086,16 +1098,65 @@ class Engine:
                         )
                         if done_count > 0:
                             cost = budget_final["real_cost_usd"] or budget_final["estimated_cost_usd"]
-                            mem.add(
-                                "pattern",
-                                f"Successfully completed all {done_count} tasks in {self.mode} mode "
-                                f"across {budget_final['session_count']} sessions "
-                                f"(${cost:.4f})",
+                            content = (f"Successfully completed all {done_count} tasks in {self.mode} mode "
+                                       f"across {budget_final['session_count']} sessions (${cost:.4f})")
+                            store.add(ExpertiseRecord(
+                                record_type="pattern", classification="tactical",
+                                domain="", content=content,
+                                source_project=str(self.project_dir),
                                 tags=[self.mode, "completed", "success"],
-                                project_source=str(self.project_dir),
-                            )
+                                content_hash=_hashlib.sha256(content.encode()).hexdigest(),
+                            ))
                     except Exception:
                         pass
+
+            # Error→resolution patterns as linked failure + resolution records
+            try:
+                from services.expertise_models import infer_domain as _infer_domain
+                tl_retry = TaskList(self.project_dir)
+                tl_retry.load()
+                retry_count = 0
+                for task in tl_retry.tasks:
+                    if (task.status == "done"
+                            and getattr(task, "verification_attempts", 0) > 0
+                            and getattr(task, "last_verification_error", "")):
+                        # Infer domain from task file scope
+                        task_domain = ""
+                        for fp in getattr(task, "file_scope", []) or []:
+                            d = _infer_domain(fp)
+                            if d:
+                                task_domain = d
+                                break
+
+                        fail_content = (f"[{self.mode}] Task '{task.title}' failed with: "
+                                        f"{task.last_verification_error[:150]}")
+                        fail_record = ExpertiseRecord(
+                            record_type="failure", classification="observational",
+                            domain=task_domain, content=fail_content,
+                            source_project=str(self.project_dir),
+                            tags=[self.mode, "error-resolution"],
+                            file_patterns=getattr(task, "file_scope", []) or [],
+                            content_hash=_hashlib.sha256(fail_content.encode()).hexdigest(),
+                        )
+                        fail_id = store.add(fail_record)
+
+                        res_content = (f"[{self.mode}] Task '{task.title}' eventually resolved "
+                                       f"after {task.verification_attempts} attempts")
+                        res_record = ExpertiseRecord(
+                            record_type="resolution", classification="tactical",
+                            domain=task_domain, content=res_content,
+                            source_project=str(self.project_dir),
+                            resolves=fail_id,
+                            tags=[self.mode, "error-resolution"],
+                            file_patterns=getattr(task, "file_scope", []) or [],
+                            content_hash=_hashlib.sha256(res_content.encode()).hexdigest(),
+                        )
+                        store.add(res_record)
+                        retry_count += 1
+                if retry_count > 0:
+                    print(f"[MELS] Saved {retry_count} error→resolution chain(s)")
+            except Exception as e:
+                print(f"[MELS] Error→resolution save failed: {e}")
         except Exception:
             pass
 
@@ -1141,42 +1202,43 @@ class Engine:
             analysis = analyzer.analyze_audit_log()
             _session_analysis = analysis
             if analysis.insights:
-                count = analyzer.record_to_memory(
+                count = analyzer.record_to_expertise(
                     analysis, project_source=str(self.project_dir)
                 )
         except Exception:
             pass
 
-        # Harvest insights into project-scoped expertise
+        # Harvest insights into project-scoped MELS expertise store
         try:
-            from features.project_expertise import ProjectExpertise
+            import hashlib as _hashlib
+            from services.expertise_store import get_project_store
+            from services.expertise_models import ExpertiseRecord
 
-            proj_expertise = ProjectExpertise(self.project_dir)
+            proj_store = get_project_store(self.project_dir)
             pe_reflections = ctx.paths.session_reflections
             if pe_reflections.exists():
                 pe_data = json.loads(pe_reflections.read_text(encoding="utf-8"))
                 if isinstance(pe_data, list):
+                    category_to_type = {
+                        "convention": "convention", "pattern": "pattern",
+                        "failure": "failure", "decision": "decision",
+                        "reference": "reference",
+                    }
                     for pe_entry in pe_data:
-                        if not isinstance(pe_entry, dict) or not pe_entry.get(
-                            "content"
-                        ):
+                        if not isinstance(pe_entry, dict) or not pe_entry.get("content"):
                             continue
                         pe_cat = pe_entry.get("category", "pattern")
-                        if pe_cat not in (
-                            "convention",
-                            "pattern",
-                            "failure",
-                            "decision",
-                            "reference",
-                        ):
-                            pe_cat = "pattern"
-                        proj_expertise.add(
-                            content=pe_entry["content"],
-                            category=pe_cat,
+                        record_type = category_to_type.get(pe_cat, "pattern")
+                        proj_store.add(ExpertiseRecord(
+                            record_type=record_type,
+                            classification="tactical",
                             domain=pe_entry.get("domain", ""),
+                            content=pe_entry["content"],
                             tags=pe_entry.get("tags", []),
-                            source_file=pe_entry.get("source_file", ""),
-                        )
+                            file_patterns=[pe_entry["source_file"]] if pe_entry.get("source_file") else [],
+                            source_project=str(self.project_dir),
+                            content_hash=_hashlib.sha256(pe_entry["content"].encode()).hexdigest(),
+                        ))
         except Exception:
             pass
 

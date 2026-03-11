@@ -314,6 +314,17 @@ class SmartOrchestrator:
         self._mail = MailStore(self.project_dir)
         self._merge_resolver = MergeResolver(self.project_dir)
         self._budget = BudgetTracker(self.project_dir)
+        # MELS: Intra-session learning
+        self._expertise_store = None
+        self._lesson_synth = None
+        try:
+            from services.expertise_store import get_project_store
+            from services.expertise_synthesis import SessionLessonSynthesizer
+            self._expertise_store = get_project_store(self.project_dir)
+            session_key = f"smart-swarm-{datetime.utcnow().strftime('%Y%m%dT%H%M%S')}"
+            self._lesson_synth = SessionLessonSynthesizer(self._expertise_store, session_key)
+        except Exception:
+            pass  # MELS not available, legacy lesson system used as fallback
         # Circuit breaker: stop spawning after N consecutive failures
         self._consecutive_spawn_failures = 0
         self._max_consecutive_failures = 3
@@ -1759,27 +1770,8 @@ class SmartOrchestrator:
             return {"success": False, "error": str(e)}
 
     # ------------------------------------------------------------------
-    # Self-learning: lessons file I/O
+    # MELS: Lesson recording, synthesis, and context building
     # ------------------------------------------------------------------
-
-    def _lessons_path(self) -> Path:
-        return get_paths(self.project_dir).swarm_dir / "lessons.json"
-
-    def _load_lessons(self) -> dict:
-        """Load the lessons file (errors + synthesized lessons)."""
-        path = self._lessons_path()
-        if path.exists():
-            try:
-                return json.loads(path.read_text(encoding="utf-8"))
-            except Exception as e:
-                print(f"[WARNING] Lessons file load failed: {e}", flush=True)
-        return {"errors": [], "lessons": []}
-
-    def _save_lessons(self, data: dict) -> None:
-        """Write the full lessons data back to disk."""
-        path = self._lessons_path()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
     def _record_worker_error(
         self,
@@ -1790,21 +1782,37 @@ class SmartOrchestrator:
         task_id: str = "",
         file_path: str = "",
     ) -> str:
-        """Append a structured error to lessons.json. Returns the error ID."""
-        data = self._load_lessons()
-        err_id = f"err-{len(data['errors']) + 1:03d}"
-        data["errors"].append({
-            "id": err_id,
-            "worker_id": worker_id,
-            "worker_name": worker_name,
-            "timestamp": datetime.utcnow().isoformat() + "Z",
-            "tool_name": tool_name,
-            "file_path": file_path,
-            "task_id": task_id,
-            "error_message": error_message[:500],
-            "category": "auto",
-        })
-        self._save_lessons(data)
+        """Record a worker error via MELS synthesizer."""
+        if not self._lesson_synth:
+            print(f"[WARNING] MELS error not tracked — synthesizer not initialised (worker-{worker_id})", flush=True)
+            return f"err-{worker_id}-untracked"
+
+        err_id, new_lesson = self._lesson_synth.record_error(
+            worker_id=str(worker_id),
+            worker_name=worker_name,
+            tool_name=tool_name,
+            error_message=error_message,
+            file_path=file_path,
+            task_id=task_id,
+        )
+        # Emit event if a new lesson was synthesized
+        if new_lesson:
+            asyncio.ensure_future(self.emit({
+                "type": "expertise_lesson_created",
+                "lesson_id": new_lesson.id,
+                "content": new_lesson.content[:200],
+                "severity": new_lesson.severity,
+                "quality_score": new_lesson.quality_score,
+                "domain": new_lesson.domain,
+            }))
+            print(f"[MELS] Lesson synthesized: {new_lesson.content[:80]}", flush=True)
+        # Propagate high-quality lessons to active workers
+        lessons = self._lesson_synth.get_lessons_for_worker(
+            file_scope=[], exclude_worker=str(worker_id),
+        )
+        for lesson in lessons:
+            if lesson.quality_score >= 0.6 and str(worker_id) not in lesson.propagated_to:
+                asyncio.ensure_future(self._propagate_lesson_to_active_workers(lesson))
         return err_id
 
     def _save_lesson(
@@ -1814,52 +1822,56 @@ class SmartOrchestrator:
         severity: str = "medium",
         source_errors: list[str] | None = None,
     ) -> str:
-        """Append a synthesized lesson. Returns the lesson ID."""
-        data = self._load_lessons()
-        lesson_id = f"lesson-{len(data['lessons']) + 1:03d}"
-        data["lessons"].append({
-            "id": lesson_id,
-            "source_errors": source_errors or [],
-            "lesson": lesson,
-            "applies_to": applies_to or [],
-            "severity": severity,
-            "created_by": "orchestrator",
-            "created_at": datetime.utcnow().isoformat() + "Z",
-        })
-        self._save_lessons(data)
-        return lesson_id
+        """Save a lesson to MELS expertise store. Returns the lesson ID."""
+        if not self._expertise_store or not self._lesson_synth:
+            print(f"[WARNING] MELS lesson not saved — store not initialised: {lesson[:80]}", flush=True)
+            return "lesson-untracked"
+
+        from services.expertise_models import SessionLesson, infer_domain
+        # Infer domain from file patterns
+        domain = ""
+        for fp in (applies_to or []):
+            d = infer_domain(fp)
+            if d:
+                domain = d
+                break
+        if not domain:
+            # Fallback: infer from lesson content keywords
+            for kw, d in [("react", "typescript.react"), ("typescript", "typescript"),
+                          ("python", "python"), ("fastapi", "python.fastapi"),
+                          ("test", "testing"), ("docker", "devops.docker"),
+                          ("api", "architecture.api"), ("css", "styling")]:
+                if kw in lesson.lower():
+                    domain = d
+                    break
+
+        mels_lesson = SessionLesson(
+            session_id=self._lesson_synth._session_id,
+            content=lesson,
+            severity=severity if severity in ("low", "medium", "high", "critical") else "medium",
+            domain=domain,
+            file_patterns=applies_to or [],
+            source_error_ids=source_errors or [],
+            quality_score=0.7,  # Orchestrator-authored lessons are high quality
+        )
+        self._expertise_store.add_session_lesson(mels_lesson)
+        asyncio.ensure_future(self.emit({
+            "type": "expertise_lesson_created",
+            "lesson_id": mels_lesson.id,
+            "content": lesson[:200],
+            "severity": mels_lesson.severity,
+            "quality_score": mels_lesson.quality_score,
+            "domain": mels_lesson.domain,
+        }))
+        return mels_lesson.id
 
     def _build_lessons_context(self, task_ids: list[str], file_scope: list[str]) -> str:
-        """Build a formatted lessons section for injection into worker overlay.
-
-        Filters lessons by relevance to the worker's file scope.
-        Caps at 10 lessons to prevent prompt bloat.
-        """
-        data = self._load_lessons()
-        lessons = data.get("lessons", [])
-        if not lessons:
+        """Build a formatted lessons section for injection into worker overlay."""
+        if not self._lesson_synth:
             return ""
 
-        # Filter by relevance: keep lessons whose applies_to patterns match the file scope
-        def is_relevant(lesson: dict) -> bool:
-            patterns = lesson.get("applies_to", [])
-            if not patterns:
-                return True  # global lesson
-            import fnmatch
-            for pat in patterns:
-                for f in file_scope:
-                    if fnmatch.fnmatch(f, pat):
-                        return True
-            return False
-
-        relevant = [l for l in lessons if is_relevant(l)]
-        # Sort by severity (high first)
-        severity_order = {"high": 0, "medium": 1, "low": 2}
-        relevant.sort(key=lambda l: severity_order.get(l.get("severity", "medium"), 1))
-        # Cap at 10
-        relevant = relevant[:10]
-
-        if not relevant:
+        lessons = self._lesson_synth.get_lessons_for_worker(file_scope)
+        if not lessons:
             return ""
 
         lines = [
@@ -1867,49 +1879,152 @@ class SmartOrchestrator:
             "Follow these to avoid repeating the same mistakes:",
             "",
         ]
-        for l in relevant:
-            sev = l.get("severity", "medium").upper()
-            lines.append(f"- **[{sev}]** {l['lesson']}")
-
+        severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+        for l in sorted(lessons, key=lambda x: severity_order.get(x.severity, 2))[:10]:
+            lines.append(f"- **[{l.severity.upper()}]** {l.content}")
         return "\n".join(lines)
 
     # ------------------------------------------------------------------
-    # Self-learning: orchestrator tool handlers
+    # MELS: orchestrator tool handlers
     # ------------------------------------------------------------------
 
     async def _tool_get_lessons(self, args: dict) -> dict:
-        data = self._load_lessons()
+        """Get lessons from MELS expertise store."""
+        if not self._expertise_store or not self._lesson_synth:
+            return {"success": True, "error_count": 0, "lesson_count": 0, "errors": [], "lessons": []}
+
+        lessons = self._expertise_store.get_session_lessons(self._lesson_synth._session_id)
         return {
             "success": True,
-            "error_count": len(data.get("errors", [])),
-            "lesson_count": len(data.get("lessons", [])),
-            "errors": data.get("errors", [])[-20:],  # last 20 errors
-            "lessons": data.get("lessons", []),
+            "error_count": len(self._lesson_synth._errors),
+            "lesson_count": len(lessons),
+            "errors": self._lesson_synth._errors[-20:],
+            "lessons": [{"id": l.id, "lesson": l.content, "severity": l.severity,
+                         "quality_score": l.quality_score, "domain": l.domain,
+                         "file_patterns": l.file_patterns, "created_at": l.created_at}
+                        for l in lessons],
         }
 
     def _try_self_correction(self, worker_id: int, error_text: str, wt_path: Path) -> None:
-        """If a recorded lesson matches this error, steer the worker with advice."""
+        """If a MELS lesson matches this error, steer the worker with advice."""
+        if not self._lesson_synth:
+            return
         try:
-            lessons = self._load_lessons().get("lessons", [])
+            lessons = self._lesson_synth.get_lessons_for_worker(file_scope=[])
             if not lessons:
                 return
             error_lower = error_text.lower()
-            # Match if any keyword (4+ chars) from the lesson appears in the error
             for lesson in lessons:
-                lesson_words = {w for w in lesson["lesson"].lower().split() if len(w) > 4}
+                lesson_words = {w for w in lesson.content.lower().split() if len(w) > 4}
                 if sum(1 for w in lesson_words if w in error_lower) >= 2:
-                    advice = lesson["lesson"]
                     write_steering_message(
                         wt_path,
                         f"[SELF-CORRECTION] A similar error was seen before.\n"
-                        f"Lesson: {advice}\n"
+                        f"Lesson: {lesson.content}\n"
                         f"Apply this lesson to fix your current approach.",
                         "instruction",
                     )
-                    print(f"[SELF-CORRECTION] Sent lesson to worker-{worker_id}: {advice[:80]}", flush=True)
-                    return  # only send one lesson per error
+                    print(f"[SELF-CORRECTION] Sent lesson to worker-{worker_id}: {lesson.content[:80]}", flush=True)
+                    return
         except Exception as e:
             print(f"[WARNING] Lesson send to worker failed: {e}", flush=True)
+
+    # ------------------------------------------------------------------
+    # MELS: Mid-session lesson propagation & post-session promotion
+    # ------------------------------------------------------------------
+
+    async def _propagate_lesson_to_active_workers(self, lesson) -> None:
+        """Push high-severity lessons to running workers whose file scope overlaps."""
+        try:
+            for worker_id, handle in self._workers.items():
+                if handle.status != "running":
+                    continue
+                if str(worker_id) in lesson.propagated_to:
+                    continue
+                # Check file scope overlap
+                if lesson.file_patterns and hasattr(handle, "file_scope") and handle.file_scope:
+                    import fnmatch as fnm
+                    overlap = False
+                    for pat in lesson.file_patterns:
+                        for fp in handle.file_scope:
+                            if fnm.fnmatch(fp, pat):
+                                overlap = True
+                                break
+                        if overlap:
+                            break
+                    if not overlap:
+                        continue
+
+                # Steering message for immediate injection
+                wt_path = getattr(handle, "worktree_path", None)
+                if wt_path:
+                    write_steering_message(
+                        Path(wt_path),
+                        f"[LESSON FROM PEER] {lesson.content}\nSeverity: {lesson.severity}. Apply this now.",
+                        "instruction",
+                    )
+                    lesson.propagated_to.append(str(worker_id))
+                    if self._expertise_store:
+                        self._expertise_store.update_session_lesson(
+                            lesson.id, propagated_to=lesson.propagated_to,
+                        )
+                    # Emit WebSocket event
+                    await self.emit({
+                        "type": "expertise_lesson_propagated",
+                        "lesson_id": lesson.id,
+                        "worker_id": worker_id,
+                        "content": lesson.content[:200],
+                    })
+                    print(f"[MELS] Propagated lesson to worker-{worker_id}: {lesson.content[:80]}", flush=True)
+        except Exception as e:
+            print(f"[WARNING] MELS lesson propagation failed: {e}", flush=True)
+
+    async def _promote_session_lessons(self) -> None:
+        """At session end, promote high-quality lessons to permanent records."""
+        if not self._expertise_store or not self._lesson_synth:
+            return
+        try:
+            session_key = self._lesson_synth._session_id
+            lessons = self._expertise_store.get_session_lessons(session_key)
+            promoted = 0
+            for lesson in lessons:
+                if lesson.quality_score >= 0.6:
+                    record_id = self._expertise_store.promote_lesson(lesson.id)
+                    if record_id:
+                        promoted += 1
+                        await self.emit({
+                            "type": "expertise_record_promoted",
+                            "lesson_id": lesson.id,
+                            "record_id": record_id,
+                        })
+            if promoted > 0:
+                print(f"[MELS] Promoted {promoted} session lesson(s) to permanent records", flush=True)
+
+            # Sync high-confidence project records to cross-project store
+            self._sync_to_cross_project()
+        except Exception as e:
+            print(f"[WARNING] MELS lesson promotion failed: {e}", flush=True)
+
+    def _sync_to_cross_project(self) -> None:
+        """Sync high-confidence project records to cross-project store."""
+        if not self._expertise_store:
+            return
+        try:
+            from services.expertise_store import get_cross_project_store
+            cross_store = get_cross_project_store()
+            # Get foundational records with high confidence
+            records = self._expertise_store.search(
+                classification="foundational", limit=50,
+            )
+            synced = 0
+            for rec in records:
+                if rec.confidence >= 0.7:
+                    cross_store.add(rec)
+                    synced += 1
+            if synced > 0:
+                print(f"[MELS] Synced {synced} record(s) to cross-project store", flush=True)
+        except Exception as e:
+            print(f"[WARNING] MELS cross-project sync failed: {e}", flush=True)
 
     async def _tool_add_lesson(self, args: dict) -> dict:
         lesson_text = args.get("lesson", "")
@@ -2347,6 +2462,8 @@ spawn new workers for remaining tasks, and call signal_complete when all done.""
         to a thread-pool executor so the asyncio event loop stays responsive
         during cleanup and in-flight HTTP requests are not dropped.
         """
+        # MELS: Promote high-quality session lessons before cleanup
+        await self._promote_session_lessons()
         import shutil
 
         loop = asyncio.get_event_loop()
@@ -2449,10 +2566,10 @@ spawn new workers for remaining tasks, and call signal_complete when all done.""
         self._mail.close()
 
         # 8. Clean up temporary files in swarm dir but preserve state for resume
-        #    (lessons.json, mail.db, merge_queue.db, etc. are needed if user resumes)
+        #    (mail.db, merge_queue.db, etc. are needed if user resumes)
         swarm_dir = get_paths(self.project_dir).swarm_dir
         if swarm_dir.exists():
-            _preserve = {"lessons.json", "mail.db", "merge_queue.db", "merge_history.json"}
+            _preserve = {"mail.db", "merge_queue.db", "merge_history.json"}
 
             def _selective_cleanup(sd=swarm_dir):
                 for child in sd.iterdir():

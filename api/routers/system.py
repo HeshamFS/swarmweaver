@@ -319,20 +319,20 @@ async def get_project_expertise(
     domain: Optional[str] = Query(None, description="Filter by domain"),
     q: Optional[str] = Query(None, description="Search query"),
 ):
-    """Get project-scoped expertise entries."""
+    """Get project-scoped expertise entries via MELS."""
     try:
-        from features.project_expertise import ProjectExpertise
-        store = ProjectExpertise(Path(path))
-        if q:
-            entries = store.search(q)
-        elif domain:
-            entries = store.get_by_domain(domain)
-        else:
-            entries = store.get_all()
+        from services.expertise_store import get_project_store
+        store = get_project_store(Path(path))
+        records = store.search(
+            query=q or "",
+            domain=domain,
+            limit=50,
+        )
+        domains_data = store.get_domains()
         return {
-            "entries": [e.to_dict() for e in entries],
-            "domains": store.get_domains(),
-            "total": len(entries),
+            "entries": [r.to_dict() for r in records],
+            "domains": domains_data,
+            "total": len(records),
         }
     except Exception as e:
         return {"entries": [], "domains": [], "total": 0, "error": str(e)}
@@ -347,19 +347,28 @@ async def add_project_expertise(
     tags: str = Query("", description="Comma-separated tags"),
     source_file: str = Query("", description="Source file path"),
 ):
-    """Add a project expertise entry."""
+    """Add a project expertise entry via MELS."""
     try:
-        from features.project_expertise import ProjectExpertise
-        store = ProjectExpertise(Path(path))
+        import hashlib
+        from services.expertise_store import get_project_store
+        from services.expertise_models import ExpertiseRecord
+        store = get_project_store(Path(path))
         tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
-        entry_id = store.add(
-            content=content,
-            category=category,
+        category_to_type = {"pattern": "pattern", "mistake": "failure",
+                            "solution": "resolution", "preference": "convention",
+                            "failure": "failure"}
+        record = ExpertiseRecord(
+            record_type=category_to_type.get(category, "pattern"),
+            classification="tactical",
             domain=domain,
+            content=content,
             tags=tag_list,
-            source_file=source_file,
+            file_patterns=[source_file] if source_file else [],
+            source_project=str(path),
+            content_hash=hashlib.sha256(content.encode()).hexdigest(),
         )
-        return {"status": "ok", "id": entry_id}
+        record_id = store.add(record)
+        return {"status": "ok", "id": record_id}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
@@ -369,11 +378,11 @@ async def delete_project_expertise(
     entry_id: str,
     path: str = Query(..., description="Project directory path"),
 ):
-    """Delete a project expertise entry."""
+    """Archive a project expertise entry via MELS."""
     try:
-        from features.project_expertise import ProjectExpertise
-        store = ProjectExpertise(Path(path))
-        deleted = store.delete(entry_id)
-        return {"status": "ok" if deleted else "not_found", "deleted": deleted}
+        from services.expertise_store import get_project_store
+        store = get_project_store(Path(path))
+        archived = store.archive(entry_id)
+        return {"status": "ok" if archived else "not_found", "deleted": archived}
     except Exception as e:
         return {"status": "error", "message": str(e)}

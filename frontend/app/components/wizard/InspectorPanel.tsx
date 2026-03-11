@@ -1,7 +1,7 @@
 import { TaskPanel } from "../TaskPanel";
 import { ObservabilityPanel } from "../ObservabilityPanel";
 import { ADRPanel } from "../ADRPanel";
-import { MemoryPanel } from "../MemoryPanel";
+import { ExpertisePanel } from "../ExpertisePanel";
 import type {
   AgentStatus,
   TaskData,
@@ -9,21 +9,15 @@ import type {
   SessionStats,
 } from "../../hooks/useSwarmWeaver";
 
-type RightPanelTab = "tasks" | "observability" | "adrs" | "memory" | "notes";
+type RightPanelTab = "tasks" | "observability" | "adrs" | "expertise" | "notes";
 
 const RIGHT_TABS: { key: RightPanelTab; label: string }[] = [
   { key: "tasks", label: "Tasks" },
   { key: "observability", label: "Observe" },
   { key: "adrs", label: "ADRs" },
-  { key: "memory", label: "Memory" },
+  { key: "expertise", label: "Expertise" },
   { key: "notes", label: "Notes" },
 ];
-
-interface Reflection {
-  category: string;
-  content: string;
-  timestamp?: string;
-}
 
 export interface InspectorPanelProps {
   rightTab: RightPanelTab;
@@ -88,7 +82,7 @@ export function InspectorPanel({
           />
         )}
         {rightTab === "adrs" && <ADRPanel projectDir={currentProject} />}
-        {rightTab === "memory" && <MemoryPanel projectDir={currentProject} />}
+        {rightTab === "expertise" && <ExpertisePanel projectDir={currentProject} />}
         {rightTab === "notes" && <NotesPanel projectDir={currentProject} />}
       </div>
     </div>

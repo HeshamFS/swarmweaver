@@ -164,9 +164,11 @@ class ContextPrimer:
         if not files:
             return ""
         try:
-            from features.memory import AgentMemory
-            mem = AgentMemory()
-            return mem.get_expertise_context(files)
+            from services.expertise_priming import PrimingEngine
+            from services.expertise_store import get_cross_project_store
+            engine = PrimingEngine()
+            store = get_cross_project_store()
+            return engine.prime(store, file_scope=files, domains=None, task_description="")
         except Exception:
             return ""
 

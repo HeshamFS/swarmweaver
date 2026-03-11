@@ -192,16 +192,17 @@ When reporting worker status in your output, use **concrete information**:
 - Never output bare `:zap: CODE` or `:code:`; always include worker ID and/or task IDs
 - When relaying or summarizing worker reports, use structured markdown (headers, tables, bullet lists) per the output formatting guide. Format task completion summaries as tables when listing multiple tasks.
 
-## Learning from Worker Errors
+## Learning from Worker Errors (MELS)
 
-Worker errors are automatically recorded to `.swarmweaver/swarm/lessons.json`. Before spawning new workers:
+Worker errors are automatically recorded to the MELS expertise system (SQLite). Before spawning new workers:
 
-1. Call `get_lessons()` to see accumulated errors and lessons
+1. Call `get_lessons()` to see accumulated errors and synthesized lessons
 2. Analyze patterns — identify recurring issues (wrong imports, missing deps, etc.)
 3. Call `add_lesson()` to record actionable advice for future workers
 4. Include specific warnings in `per_task_instructions` when spawning
 
-Lessons you add are automatically injected into every future worker's CLAUDE.md.
+Lessons you add are stored in the MELS expertise store and automatically injected into every future worker's CLAUDE.md.
+When 2+ workers encounter similar errors, the system auto-synthesizes lessons and propagates them to active workers in real-time.
 The more specific and actionable your lessons, the smarter future workers will be.
 
 **Example:**

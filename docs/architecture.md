@@ -23,7 +23,7 @@ swarmweaver/
 │   └── state.py                   # App-level state (run registry, etc.)
 │
 ├── core/                        # Agent loop, orchestrators, merge, worktree
-│   ├── agent.py                   # Multi-phase session loop with memory harvesting
+│   ├── agent.py                   # Multi-phase session loop with MELS expertise harvesting
 │   ├── engine.py                  # Single-agent execution (SDK streaming)
 │   ├── orchestrator.py            # SwarmOrchestrator (static N workers)
 │   ├── smart_orchestrator.py      # SmartOrchestrator (AI-orchestrated dynamic workers)
@@ -55,12 +55,16 @@ swarmweaver/
 │   ├── steering.py                 # Mid-session steering (instruction/reflect/abort)
 │   ├── approval.py                 # Approval gates
 │   ├── verification.py            # Self-healing test verification loop
-│   ├── memory.py                  # Cross-project learning
 │   └── plugins.py                 # Custom hook plugins
 │
-├── services/                    # Shared helpers
+├── services/                    # Shared helpers + MELS expertise system
 │   ├── events.py                  # Structured event parser
 │   ├── insights.py                # Session analytics
+│   ├── expertise_models.py        # MELS data models (10 record types, domain taxonomy)
+│   ├── expertise_store.py         # MELS SQLite store (CRUD, search, governance)
+│   ├── expertise_scoring.py       # MELS confidence, decay, priming score
+│   ├── expertise_priming.py       # MELS token-budget-aware priming engine
+│   ├── expertise_synthesis.py     # MELS real-time lesson synthesis from worker errors
 │   ├── timeline.py                # Cross-agent event timeline
 │   ├── transcript_costs.py        # Transcript-based cost analysis
 │   ├── monitor.py                 # Fleet health monitor
