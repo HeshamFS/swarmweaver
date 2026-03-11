@@ -301,6 +301,9 @@ app.add_typer(mail_app, name="mail")
 from cli.commands.watchdog import watchdog_app
 app.add_typer(watchdog_app, name="watchdog")
 
+from cli.commands.lsp import lsp_app
+app.add_typer(lsp_app, name="lsp")
+
 
 @checkpoint_app.command("list")
 def checkpoint_list(

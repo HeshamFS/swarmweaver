@@ -110,6 +110,45 @@ WATCHDOG_MAX_FAILURE_RATE=0.3        # Stricter circuit breaker
 
 Live editing via API: `PUT /api/watchdog/config` (merges with existing config).
 
+## LSP Configuration: lsp.yaml
+
+The LSP code intelligence system is configured via `.swarmweaver/lsp.yaml`. All values can also be set via environment variables prefixed with `SWARMWEAVER_LSP_`.
+
+```yaml
+# .swarmweaver/lsp.yaml
+enabled: true
+auto_install: true              # Auto-install missing language servers (npm/pip/cargo)
+auto_detect: true               # Detect languages from project files
+max_servers_per_worktree: 3     # Max concurrent LSP servers per worker worktree
+health_check_interval_s: 30.0  # How often to check server health
+request_timeout_s: 10.0        # Timeout for LSP requests
+diagnostics_debounce_ms: 150   # Debounce interval for post-edit diagnostics
+diagnostics_timeout_s: 3.0     # Max wait time for diagnostics after file change
+max_diagnostics_per_file: 50   # Cap diagnostics per file to avoid flooding
+disabled_servers: []            # List of server names to skip (e.g., ["solargraph"])
+server_overrides:               # Override settings for specific servers
+  pyright:
+    settings:
+      python.analysis.typeCheckingMode: "basic"
+custom_servers:                 # Additional language servers not in the built-in 22
+  - language_id: "haskell"
+    server_name: "haskell-language-server"
+    command: "haskell-language-server-wrapper"
+    args: ["--lsp"]
+    extensions: [".hs"]
+```
+
+Environment variable overrides use the `SWARMWEAVER_LSP_` prefix:
+```bash
+SWARMWEAVER_LSP_ENABLED=true
+SWARMWEAVER_LSP_AUTO_INSTALL=false
+SWARMWEAVER_LSP_MAX_SERVERS_PER_WORKTREE=5
+```
+
+Config loading priority: `.swarmweaver/lsp.yaml` → `~/.swarmweaver/lsp.yaml` → env vars → defaults.
+
+Live editing via API: `GET/PUT /api/lsp/config`.
+
 ## Project Artifacts: .swarmweaver/
 
 Each target project gets a `.swarmweaver/` directory with session state and artifacts:
@@ -136,6 +175,7 @@ Each target project gets a `.swarmweaver/` directory with session state and arti
 | `mail.db` | Inter-agent mail database (SQLite WAL mode) |
 | `watchdog.yaml` | Watchdog health monitor configuration |
 | `watchdog_events.db` | Persistent watchdog event log (SQLite) |
+| `lsp.yaml` | LSP code intelligence configuration |
 
 Delete `.swarmweaver/` to reset a project; SwarmWeaver will recreate it on the next run.
 

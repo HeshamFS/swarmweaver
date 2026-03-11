@@ -40,7 +40,8 @@ swarmweaver/
 │   ├── security.py                # Bash command allowlist (~60+ commands)
 │   ├── capability_hooks.py        # Role-based capability enforcement
 │   ├── main_hooks.py              # Server/env/file mgmt, steering, audit, mail injection
-│   └── marathon_hooks.py         # Auto-commit, health, loop detection
+│   ├── marathon_hooks.py          # Auto-commit, health, loop detection
+│   └── lsp_hooks.py               # Post-edit LSP diagnostics, cross-worker routing, watchdog signal
 │
 ├── state/                       # Persistence layer
 │   ├── task_list.py               # Universal task list with dependencies
@@ -62,7 +63,11 @@ swarmweaver/
 │   ├── insights.py                # Session analytics
 │   ├── timeline.py                # Cross-agent event timeline
 │   ├── transcript_costs.py        # Transcript-based cost analysis
-│   └── monitor.py                 # Fleet health monitor
+│   ├── monitor.py                 # Fleet health monitor
+│   ├── lsp_client.py              # JSON-RPC 2.0 LSP client (14 operations)
+│   ├── lsp_manager.py             # 22 built-in language servers, lifecycle, config
+│   ├── lsp_intelligence.py        # Impact analysis, unused code, dependency graph, health score
+│   └── lsp_tools.py               # Worker-facing MCP tools (lsp_query, lsp_diagnostics_summary)
 │
 ├── utils/                       # Utilities
 │   ├── progress.py                # Progress dashboard
@@ -174,7 +179,7 @@ Any state → ZOMBIE (PID dead) → TERMINATED
 
 States: `BOOTING`, `WORKING`, `IDLE`, `WARNING`, `STALLED`, `RECOVERING`, `COMPLETED`, `ZOMBIE`, `TERMINATED`. Transitions are validated against an explicit `ALLOWED_TRANSITIONS` table — invalid transitions are rejected.
 
-### 6-Signal Health Evaluation (Priority Order)
+### 7-Signal Health Evaluation (Priority Order)
 
 1. **asyncio.Task state** — done/cancelled/exception (highest priority)
 2. **PID liveness** — `os.kill(pid, 0)`
@@ -182,6 +187,7 @@ States: `BOOTING`, `WORKING`, `IDLE`, `WARNING`, `STALLED`, `RECOVERING`, `COMPL
 4. **Tool call activity** — catches "thinking" phases that look like stalls
 5. **Git commit activity** — `git log --since` on worker branch
 6. **Heartbeat** — active heartbeat protocol via mail system
+7. **LSP diagnostic trend** — rising error count signals worker may be struggling
 
 ### Circuit Breaker
 
@@ -207,6 +213,52 @@ All state transitions, nudges, triage results, and terminations are recorded in 
 ### Configuration
 
 `watchdog.yaml` in `.swarmweaver/` with env var overrides (`WATCHDOG_*`). See [configuration.md](configuration.md) for full reference.
+
+## LSP Code Intelligence
+
+Native Language Server Protocol integration provides real-time code analysis for swarm workers.
+
+### Architecture
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| LSP Client | `services/lsp_client.py` | JSON-RPC 2.0 over stdio, 14 LSP operations |
+| LSP Manager | `services/lsp_manager.py` | 22 built-in server specs, lifecycle, auto-detect/install |
+| LSP Hooks | `hooks/lsp_hooks.py` | Post-edit diagnostic injection, cross-worker routing |
+| LSP Tools | `services/lsp_tools.py` | Worker MCP tools (`lsp_query`, `lsp_diagnostics_summary`) |
+| Code Intelligence | `services/lsp_intelligence.py` | Impact analysis, unused code, dependency graph, health score |
+| API | `api/routers/lsp.py` | 13 REST endpoints |
+| CLI | `cli/commands/lsp.py` | 5 CLI commands |
+| Frontend | `frontend/app/components/LSPPanel.tsx` | Code Intel dashboard |
+
+### 22 Built-in Language Servers (4 Tiers)
+
+| Tier | Servers |
+|------|---------|
+| **Core** | typescript-language-server, pyright, gopls, rust-analyzer |
+| **Secondary** | clangd, jdtls, solargraph, intelephense, kotlin-language-server, sourcekit-lsp |
+| **Specialty** | zls, lua-language-server, elixir-ls, gleam, deno |
+| **Config/Markup** | yaml-language-server, bash-language-server, dockerfile-language-server, terraform-ls, css/html/vue language servers |
+
+Servers are auto-detected from project markers (e.g., `tsconfig.json` → TypeScript, `pyproject.toml` → Python) and lazily spawned per worktree.
+
+### Data Flow
+
+```
+Worker edits file → lsp_post_edit_hook (PostToolUse)
+    → LSP didChange → wait for diagnostics (≤3s, 150ms debounce)
+    → Errors injected into agent context
+    → Cross-worker diagnostics routed via mail system
+    → Watchdog receives diagnostic trend as 7th health signal
+```
+
+### Per-Worktree Isolation
+
+Each swarm worker gets its own LSP server instances, tagged with `worker_id`. Diagnostics from one worker's edits that affect another worker's file scope are automatically routed via the inter-agent mail system.
+
+### Post-Merge Validation
+
+After merging a worker's branch, the orchestrator runs LSP diagnostics on all changed files. New errors are reported as `lsp.merge_validation` events.
 
 ## Security Model
 

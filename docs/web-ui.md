@@ -76,7 +76,7 @@ Real-time updates via WebSocket events: `watchdog_state_change`, `watchdog_nudge
 
 ### Observability Panel
 
-Nine sub-tabs for deep inspection:
+Ten sub-tabs for deep inspection:
 
 | Sub-tab | Content |
 |---------|---------|
@@ -89,6 +89,21 @@ Nine sub-tabs for deep inspection:
 | Agents | Agent identity and success rates |
 | Checkpoints | File state checkpoints for rollback |
 | Profile | Session profiling data |
+| Code Intel | LSP diagnostic dashboard (see below) |
+
+### Code Intel Tab (LSP)
+
+The Code Intel tab in the Observability panel provides a full LSP diagnostic dashboard:
+
+- **Code Health Bar** — Project-wide score (0–100) with green/amber/red gradient, per-language badges, and sparkline trend
+- **Diagnostics Table** — Sortable/filterable by file, line, severity, message, source, worker. Severity badges: ERROR (red pulse), WARNING (amber), INFO (blue), HINT (gray)
+- **LSP Servers** — Card per server showing language, status badge, file count, diagnostic count, with restart button
+- **Per-Worker Diagnostics** — Mini card per worker with error/warning counts and cross-worker conflict indicators (swarm mode only)
+- **Impact Visualization** — On-demand symbol search showing callers/callees tree with cross-worker edges
+
+Worker cards in the Swarm panel also show inline diagnostic badges (errors/warnings) from LSP data.
+
+Real-time updates via WebSocket events: `lsp.diagnostics_update`, `lsp.server_status`, `lsp.code_health`, `lsp.cross_worker_alert`, `lsp.merge_validation`.
 
 ### Session Replay
 

@@ -119,6 +119,9 @@ class Engine:
         # Per-worker budget and turn limits (smart swarm)
         max_budget_usd: Optional[float] = None,
         max_turns: Optional[int] = None,
+        # LSP integration (smart swarm — per-worktree language servers)
+        lsp_manager: Optional[object] = None,
+        file_scope: Optional[list[str]] = None,
     ):
         self.project_dir = Path(project_dir)
         self.mode = mode
@@ -150,6 +153,9 @@ class Engine:
         self._cumulative_cache_read_tokens: int = 0
         self._cumulative_cache_creation_tokens: int = 0
         self._context_warning_sent: bool = False
+        # LSP integration
+        self._lsp_manager = lsp_manager
+        self._file_scope: Optional[list[str]] = file_scope
 
     @staticmethod
     async def _noop_event(event: dict) -> None:
@@ -312,6 +318,27 @@ class Engine:
                         except Exception as _wt_err:
                             print(f"[Engine] Worker tools init failed: {_wt_err}", flush=True)
 
+                    # LSP tool injection for scoped workers
+                    if self._lsp_manager and self._file_scope:
+                        try:
+                            from services.lsp_tools import (
+                                create_lsp_tool_server,
+                                LSP_TOOL_NAMES,
+                            )
+                            if _extra_mcp is None:
+                                _extra_mcp = {}
+                            if _extra_tools is None:
+                                _extra_tools = []
+                            _extra_mcp["lsp_tools"] = create_lsp_tool_server(
+                                lsp_manager=self._lsp_manager,
+                                worker_id=self._worker_id,
+                                file_scope=self._file_scope,
+                                worktree_path=self.project_dir,
+                            )
+                            _extra_tools.extend(LSP_TOOL_NAMES)
+                        except Exception as _lsp_err:
+                            print(f"[Engine] LSP tools init failed: {_lsp_err}", flush=True)
+
                     # Create SDK client
                     client = create_client(
                         self.project_dir,
@@ -339,6 +366,14 @@ class Engine:
                             set_mail_store(_worker_mail_store, f"worker-{self._worker_id}")
                         except Exception as _mail_err:
                             print(f"[Engine] Mail injection setup failed: {_mail_err}", flush=True)
+
+                    # Wire LSP context for post-edit diagnostic hooks
+                    if self._lsp_manager:
+                        try:
+                            from hooks.lsp_hooks import set_lsp_context
+                            set_lsp_context(self._lsp_manager, self.project_dir)
+                        except Exception as _lsp_ctx_err:
+                            print(f"[Engine] LSP context setup failed: {_lsp_ctx_err}", flush=True)
 
                     # Smart context priming
                     context_prime = ""

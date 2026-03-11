@@ -132,6 +132,8 @@ async def steering_hook(input_data: dict, tool_use_id: str | None, context: Any)
         if msg is None:
             return {}
 
+        print(f"[STEERING] Delivering steering message to agent (type={msg.steering_type}, dir={project_dir})", flush=True)
+
         mark_steering_processed(project_dir)
 
         if msg.steering_type == "abort":

@@ -15,7 +15,7 @@
 
 Point it at a spec, a codebase, or a bug report — it works autonomously across unlimited sessions until the job is done. Built for long-running autonomous sessions with audit trails, approval gates, and cost controls.
 
-**Key features:** Six operation modes (greenfield, feature, refactor, fix, evolve, security) · Web UI + CLI · Git worktree isolation · Multi-agent swarm with inter-agent mail · Enhanced watchdog health monitoring · Human-in-the-loop approval gates · Cross-project memory · MCP server integration
+**Key features:** Six operation modes (greenfield, feature, refactor, fix, evolve, security) · Web UI + CLI · Git worktree isolation · Multi-agent swarm with inter-agent mail · Enhanced watchdog health monitoring · Native LSP code intelligence (22 language servers) · Human-in-the-loop approval gates · Cross-project memory · MCP server integration
 
 ## Table of Contents
 
@@ -320,6 +320,13 @@ swarmweaver watchdog events  -p DIR [--worker-id N] [--type TYPE] [--limit 20]
 swarmweaver watchdog config  -p DIR [--set KEY=VALUE] # show or edit watchdog.yaml
 swarmweaver watchdog triage  WORKER_ID -p DIR        # trigger AI triage for a worker
 swarmweaver watchdog nudge   WORKER_ID -p DIR [-m MSG] # send nudge to a worker
+
+# LSP code intelligence
+swarmweaver lsp status       -p DIR                    # show running language servers
+swarmweaver lsp diagnostics  -p DIR [-s SEVERITY] [-f PATH] [-n LIMIT]
+swarmweaver lsp servers      -p DIR                    # list all 22 available server specs
+swarmweaver lsp config       -p DIR [--set KEY=VALUE]  # view or edit LSP config
+swarmweaver lsp restart      [SERVER_ID] -p DIR        # restart language servers
 ```
 
 ### Common Flags
@@ -414,7 +421,7 @@ Start with `npm run dev` and open [http://localhost:3000](http://localhost:3000)
 - **Security scan** — mandatory human review of findings before any fixes are applied
 - **Approval gates** — pause the agent for human review at key checkpoints
 - **Swarm panel** — per-worker controls, mail threads with attachments and analytics, real-time WebSocket push, merge queue, nudge/terminate buttons
-- **Observability panel** — 9 sub-tabs: Timeline, Files, Costs, Errors, Audit, Insights, Agents, Checkpoints, Profile
+- **Observability panel** — 10 sub-tabs: Timeline, Files, Costs, Errors, Audit, Insights, Agents, Checkpoints, Profile, Code Intel (LSP)
 - **Session replay** — scrub through git commit history with task state snapshots
 - **MCP server management** — add, remove, enable/disable, and test MCP servers from Settings
 - **Notifications** — Slack, Discord, browser push, and generic webhooks
@@ -459,7 +466,8 @@ swarmweaver/
 │   ├── security.py                # Bash command allowlist (~60+ commands)
 │   ├── capability_hooks.py        # Role-based capability enforcement
 │   ├── main_hooks.py              # Server/env/file mgmt, steering, audit
-│   └── marathon_hooks.py          # Auto-commit, health, loop detection
+│   ├── marathon_hooks.py          # Auto-commit, health, loop detection
+│   └── lsp_hooks.py               # Post-edit diagnostics, cross-worker routing
 │
 ├── state/                       # Persistence layer
 │   ├── task_list.py               # Universal task list with dependencies
@@ -481,7 +489,11 @@ swarmweaver/
 │   ├── insights.py                # Session analytics
 │   ├── timeline.py                # Cross-agent event timeline
 │   ├── transcript_costs.py        # Transcript-based cost analysis
-│   └── monitor.py                 # Fleet health monitor
+│   ├── monitor.py                 # Fleet health monitor
+│   ├── lsp_client.py              # JSON-RPC 2.0 LSP client (14 operations)
+│   ├── lsp_manager.py             # 22 built-in language servers, lifecycle, config
+│   ├── lsp_intelligence.py        # Impact analysis, unused code, dependency graph
+│   └── lsp_tools.py               # Worker-facing MCP tools (lsp_query, diagnostics)
 │
 ├── utils/                       # Utilities
 │   ├── progress.py                # Progress dashboard

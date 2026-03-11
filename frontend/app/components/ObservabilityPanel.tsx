@@ -11,6 +11,7 @@ import { AuditView } from "./AuditView";
 import type { EventStoreResponse, ToolStatEntry } from "./AuditView";
 import { ProfileView } from "./ProfileView";
 import type { CodebaseProfile } from "./ProfileView";
+import { LSPPanel } from "./LSPPanel";
 
 interface BudgetData {
   total_input_tokens: number;
@@ -37,7 +38,7 @@ interface ObservabilityPanelProps {
   status?: AgentStatus;
 }
 
-type TabId = "timeline" | "files" | "costs" | "errors" | "audit" | "profile" | "insights" | "agents" | "checkpoints";
+type TabId = "timeline" | "files" | "costs" | "errors" | "audit" | "profile" | "insights" | "agents" | "checkpoints" | "code-intel";
 
 const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: "timeline", label: "Timeline", icon: "\u23F1" },
@@ -49,6 +50,7 @@ const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: "agents", label: "Agents", icon: "\u{1F916}" },
   { id: "checkpoints", label: "Checkpts", icon: "\u23F1" },
   { id: "profile", label: "Profile", icon: "\u{1F4CB}" },
+  { id: "code-intel", label: "Code Intel", icon: "\u{1F9E0}" },
 ];
 
 const EVENT_ICONS: Record<string, string> = {
@@ -299,6 +301,12 @@ export function ObservabilityPanel({
   const [eventStoreData, setEventStoreData] = useState<EventStoreResponse | null>(null);
   const [toolStats, setToolStats] = useState<ToolStatEntry[]>([]);
   const [persistedErrors, setPersistedErrors] = useState<Array<{ timestamp: string; agent: string; event_type: string; tool_name: string; tool_input: string; error: string }>>([]);
+  // LSP state (polled from REST API)
+  const [lspDiagnostics, setLspDiagnostics] = useState<Record<string, Array<{ uri: string; line: number; character: number; end_line: number; end_character: number; severity: number; severity_label: string; message: string; source: string | null; code: string | number | null }>>>({});
+  const [lspServerStatus, setLspServerStatus] = useState<Record<string, { language_id: string; server_name: string; status: "stopped" | "starting" | "ready" | "degraded" | "crashed"; root_uri: string; pid: number | null; started_at: string; restart_count: number; open_files: number; diagnostic_count: number; worker_id: number | null }>>({});
+  const [lspCodeHealth, setLspCodeHealth] = useState<{ score: number; error_count: number; warning_count: number; info_count: number; hint_count: number; by_language: Record<string, { score: number; errors: number; warnings: number }> } | null>(null);
+  const [lspCodeHealthTrend, setLspCodeHealthTrend] = useState<number[]>([]);
+  const [lspCrossWorkerAlerts, setLspCrossWorkerAlerts] = useState<Array<{ source_worker_id: number; affected_worker_id: number; file_path: string; diagnostics: Array<{ uri: string; line: number; character: number; end_line: number; end_character: number; severity: number; severity_label: string; message: string; source: string | null; code: string | number | null }>; timestamp: string }>>([]);
   const auditFetched = useRef(false);
   const profileFetched = useRef(false);
 
@@ -391,6 +399,60 @@ export function ObservabilityPanel({
     }
   }, [projectDir]);
 
+  // LSP data fetching
+  const fetchLspStatus = useCallback(async () => {
+    if (!projectDir) return;
+    try {
+      const res = await fetch(`/api/lsp/status?path=${encodeURIComponent(projectDir)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.servers) {
+        const serverMap: Record<string, typeof lspServerStatus[string]> = {};
+        for (const s of data.servers) {
+          serverMap[`${s.language_id}-${s.root_uri || ""}`] = s;
+        }
+        setLspServerStatus(serverMap);
+      }
+    } catch {
+      // LSP may not be active
+    }
+  }, [projectDir]);
+
+  const fetchLspDiagnostics = useCallback(async () => {
+    if (!projectDir) return;
+    try {
+      const res = await fetch(`/api/lsp/diagnostics?path=${encodeURIComponent(projectDir)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.diagnostics) {
+        const grouped: Record<string, typeof data.diagnostics> = {};
+        for (const d of data.diagnostics) {
+          const key = d.uri || d.file || "unknown";
+          if (!grouped[key]) grouped[key] = [];
+          grouped[key].push(d);
+        }
+        setLspDiagnostics(grouped);
+      }
+    } catch {
+      // LSP may not be active
+    }
+  }, [projectDir]);
+
+  const fetchLspCodeHealth = useCallback(async () => {
+    if (!projectDir) return;
+    try {
+      const res = await fetch(`/api/lsp/code-health?path=${encodeURIComponent(projectDir)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.score !== undefined) {
+        setLspCodeHealth(data);
+        setLspCodeHealthTrend(prev => [...prev.slice(-29), data.score]);
+      }
+    } catch {
+      // LSP may not be active
+    }
+  }, [projectDir]);
+
   // Poll budget data every 5s while running
   useEffect(() => {
     if (status !== "running" || !projectDir) return;
@@ -445,6 +507,23 @@ export function ObservabilityPanel({
       profileFetched.current = true;
     }
   }, [activeTab, projectDir, fetchCodebaseProfile]);
+
+  // Fetch LSP data when code-intel tab is selected, poll while running
+  useEffect(() => {
+    if (activeTab === "code-intel" && projectDir) {
+      fetchLspStatus();
+      fetchLspDiagnostics();
+      fetchLspCodeHealth();
+      if (status === "running") {
+        const interval = setInterval(() => {
+          fetchLspStatus();
+          fetchLspDiagnostics();
+          fetchLspCodeHealth();
+        }, 8000);
+        return () => clearInterval(interval);
+      }
+    }
+  }, [activeTab, status, projectDir, fetchLspStatus, fetchLspDiagnostics, fetchLspCodeHealth]);
 
   // Reset fetch guards when projectDir changes
   useEffect(() => {
@@ -552,6 +631,18 @@ export function ObservabilityPanel({
         {activeTab === "agents" && projectDir && <AgentIdentityPanel projectDir={projectDir} status={status} />}
         {activeTab === "checkpoints" && projectDir && <CheckpointPanel projectDir={projectDir} status={status} />}
         {activeTab === "profile" && <ProfileView profile={codebaseProfile} loading={profileLoading} />}
+        {activeTab === "code-intel" && (
+          <LSPPanel
+            diagnostics={lspDiagnostics}
+            serverStatus={lspServerStatus}
+            codeHealth={lspCodeHealth}
+            codeHealthTrend={lspCodeHealthTrend}
+            crossWorkerAlerts={lspCrossWorkerAlerts}
+            projectDir={projectDir || ""}
+            isTeamMode={false}
+            workerCount={0}
+          />
+        )}
       </div>
     </div>
   );

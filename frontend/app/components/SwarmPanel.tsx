@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { SwarmWorkersTab } from "./SwarmWorkersTab";
+import type { TriageResult } from "../hooks/useWebSocket";
+import { SwarmWorkersTab, type LspWorkerDiagnostics } from "./SwarmWorkersTab";
 import { SwarmMailTab } from "./SwarmMailTab";
 import { SwarmMergesTab } from "./SwarmMergesTab";
 import { WatchdogPanel } from "./WatchdogPanel";
@@ -22,6 +23,8 @@ interface WorkerState {
   // Agent Identity (F14)
   sessions_completed?: number;
   expertise_domains?: string[];
+  // Merge info
+  merge_tier?: string | number;
   // Quality gates
   quality_gate_report?: {
     worker_id: number;
@@ -94,14 +97,6 @@ interface ConflictPrediction {
   confidence?: number;
 }
 
-interface TriageResultEntry {
-  worker_id: number;
-  verdict: "retry" | "terminate" | "extend" | "escalate";
-  reasoning: string;
-  recommended_action: string;
-  timestamp: string;
-}
-
 interface WatchdogEventData {
   id?: string;
   timestamp: string;
@@ -125,7 +120,7 @@ interface CircuitBreakerStatusData {
 interface SwarmPanelProps {
   projectDir: string;
   output: string[];
-  triageResults?: Record<number, TriageResultEntry>;
+  triageResults?: Record<number, TriageResult>;
   mailVersion?: number;  // incremented on mail_received WS event for instant refresh
   watchdogEvents?: WatchdogEventData[];
   circuitBreakerStatus?: CircuitBreakerStatusData | null;
@@ -146,10 +141,11 @@ export function SwarmPanel({ projectDir, output, triageResults, mailVersion, wat
   const [mergeQueue, setMergeQueue] = useState<MergeQueueEntry[]>([]);
   const [mergeQueueStats, setMergeQueueStats] = useState<MergeQueueStats>({ total: 0, pending: 0, merged: 0, failed: 0 });
   const [conflictPrediction, setConflictPrediction] = useState<ConflictPrediction | null>(null);
+  const [lspWorkerDiagnostics, setLspWorkerDiagnostics] = useState<Record<number, LspWorkerDiagnostics>>({});
   const [activeTab, setActiveTab] = useState<SwarmTab>("workers");
   const [workersView, setWorkersView] = useState<"list" | "hierarchy">("list");
 
-  // Poll swarm status, mail, health, and merge queue
+  // Poll swarm status, mail, health, merge queue, and LSP diagnostics
   useEffect(() => {
     if (!projectDir) return;
     const interval = setInterval(() => {
@@ -157,11 +153,13 @@ export function SwarmPanel({ projectDir, output, triageResults, mailVersion, wat
       fetchMail();
       fetchHealth();
       fetchMergeQueue();
+      fetchLspDiagnostics();
     }, 10000);
     fetchStatus();
     fetchMail();
     fetchHealth();
     fetchMergeQueue();
+    fetchLspDiagnostics();
     return () => clearInterval(interval);
   }, [projectDir]);
 
@@ -203,6 +201,41 @@ export function SwarmPanel({ projectDir, output, triageResults, mailVersion, wat
       setHealthData(data.workers || {});
     } catch {
       // Ignore
+    }
+  };
+
+  const fetchLspDiagnostics = async () => {
+    try {
+      const res = await fetch(
+        `/api/lsp/diagnostics?path=${encodeURIComponent(projectDir)}`
+      );
+      const data = await res.json();
+      const diagnostics: { uri: string; severity: number; worker_id?: number }[] = data.diagnostics || [];
+      // Aggregate by worker: match file URIs against worker file_scope
+      const perWorker: Record<number, LspWorkerDiagnostics> = {};
+      for (const diag of diagnostics) {
+        // If the API returns worker_id, use it directly
+        if (diag.worker_id != null) {
+          if (!perWorker[diag.worker_id]) perWorker[diag.worker_id] = { errors: 0, warnings: 0 };
+          if (diag.severity === 1) perWorker[diag.worker_id].errors++;
+          else if (diag.severity === 2) perWorker[diag.worker_id].warnings++;
+          continue;
+        }
+        // Otherwise match against worker file_scope
+        const diagPath = diag.uri?.replace(/^file:\/\//, "") || "";
+        for (const w of workers) {
+          if (!w.file_scope?.length) continue;
+          const matches = w.file_scope.some((scope) => diagPath.includes(scope) || diagPath.endsWith(scope));
+          if (matches) {
+            if (!perWorker[w.worker_id]) perWorker[w.worker_id] = { errors: 0, warnings: 0 };
+            if (diag.severity === 1) perWorker[w.worker_id].errors++;
+            else if (diag.severity === 2) perWorker[w.worker_id].warnings++;
+          }
+        }
+      }
+      setLspWorkerDiagnostics(perWorker);
+    } catch {
+      // Ignore - LSP may not be active
     }
   };
 
@@ -250,13 +283,29 @@ export function SwarmPanel({ projectDir, output, triageResults, mailVersion, wat
     const merged: MergeInfo[] = [];
     const failed: MergeInfo[] = [];
     for (const worker of workers) {
-      if (worker.status === "completed") {
+      if (worker.status === "merged") {
+        // Worker was successfully merged by orchestrator
+        const tierNum = typeof worker.merge_tier === "number"
+          ? worker.merge_tier
+          : typeof worker.merge_tier === "string"
+            ? parseInt(worker.merge_tier, 10) || undefined
+            : undefined;
+        merged.push({
+          worker_id: worker.worker_id,
+          branch: worker.branch_name || `worker-${worker.worker_id}`,
+          tier: tierNum,
+          details: worker.completed_tasks?.length
+            ? `${worker.completed_tasks.length} task(s) completed`
+            : undefined,
+        });
+      } else if (worker.status === "completed") {
+        // Worker finished but not yet merged — show as pending merge
         merged.push({
           worker_id: worker.worker_id,
           branch: worker.branch_name || `worker-${worker.worker_id}`,
           details: worker.completed_tasks?.length
-            ? `${worker.completed_tasks.length} task(s) completed`
-            : undefined,
+            ? `${worker.completed_tasks.length} task(s) completed — awaiting merge`
+            : "Awaiting merge",
         });
       } else if (worker.status === "error") {
         failed.push({
@@ -431,6 +480,7 @@ export function SwarmPanel({ projectDir, output, triageResults, mailVersion, wat
             overrides={swarmOverrides}
             swarmRuntime={swarmRuntime}
             triageResults={triageResults}
+            lspWorkerDiagnostics={lspWorkerDiagnostics}
           />
         )}
 
@@ -457,7 +507,7 @@ export function SwarmPanel({ projectDir, output, triageResults, mailVersion, wat
             projectDir={projectDir}
             watchdogEvents={watchdogEvents}
             circuitBreakerStatus={circuitBreakerStatus}
-            triageResults={triageResults as Record<number, { worker_id: number; verdict: "retry" | "terminate" | "extend" | "reassign"; reasoning: string; confidence: number; recommended_action?: string; suggested_nudge_message?: string }>}
+            triageResults={triageResults}
           />
         )}
       </div>

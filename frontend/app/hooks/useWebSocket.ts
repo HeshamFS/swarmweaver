@@ -38,10 +38,12 @@ export interface QualityGateReport {
 
 export interface TriageResult {
   worker_id: number;
-  verdict: "retry" | "terminate" | "extend" | "escalate";
+  verdict: "retry" | "terminate" | "extend" | "escalate" | "reassign";
   reasoning: string;
-  recommended_action: string;
-  timestamp: string;
+  recommended_action?: string;
+  suggested_nudge_message?: string;
+  confidence?: number;
+  timestamp?: string;
 }
 
 export interface MonitorHealthSummary {
@@ -82,6 +84,41 @@ export interface CircuitBreakerStatus {
   successes_in_window: number;
 }
 
+export interface LspDiagnostic {
+  uri: string;
+  line: number;
+  character: number;
+  severity: number;
+  severity_label: string;
+  message: string;
+  source: string | null;
+  code: string | number | null;
+}
+
+export interface LspServerInfo {
+  language_id: string;
+  server_name: string;
+  status: "stopped" | "starting" | "ready" | "degraded" | "crashed";
+  pid: number | null;
+  diagnostic_count: number;
+  worker_id: number | null;
+}
+
+export interface LspCodeHealth {
+  score: number;
+  error_count: number;
+  warning_count: number;
+  by_language: Record<string, { score: number; errors: number; warnings: number }>;
+}
+
+export interface LspCrossWorkerAlert {
+  source_worker_id: number;
+  affected_worker_id: number;
+  file_path: string;
+  diagnostics: LspDiagnostic[];
+  timestamp: string;
+}
+
 export interface UseWebSocketReturn {
   wsRef: React.MutableRefObject<WebSocket | null>;
   wsConnected: boolean;
@@ -101,6 +138,12 @@ export interface UseWebSocketReturn {
   workerTokenMap: Record<number, { input: number; output: number; cacheRead: number; cacheCreation: number }>;
   watchdogEvents: WatchdogEvent[];
   circuitBreakerStatus: CircuitBreakerStatus | null;
+  // LSP state
+  lspDiagnostics: Record<string, LspDiagnostic[]>;
+  lspServerStatus: Record<string, LspServerInfo>;
+  lspCodeHealth: LspCodeHealth | null;
+  lspCodeHealthTrend: number[];
+  lspCrossWorkerAlerts: LspCrossWorkerAlert[];
 }
 
 /** Backend WS URL — direct to FastAPI on port 8000. */
@@ -140,6 +183,12 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
   // Watchdog events
   const [watchdogEvents, setWatchdogEvents] = useState<WatchdogEvent[]>([]);
   const [circuitBreakerStatus, setCircuitBreakerStatus] = useState<CircuitBreakerStatus | null>(null);
+  // LSP state
+  const [lspDiagnostics, setLspDiagnostics] = useState<Record<string, LspDiagnostic[]>>({});
+  const [lspServerStatus, setLspServerStatus] = useState<Record<string, LspServerInfo>>({});
+  const [lspCodeHealth, setLspCodeHealth] = useState<LspCodeHealth | null>(null);
+  const [lspCodeHealthTrend, setLspCodeHealthTrend] = useState<number[]>([]);
+  const [lspCrossWorkerAlerts, setLspCrossWorkerAlerts] = useState<LspCrossWorkerAlert[]>([]);
 
   const close = useCallback(() => {
     if (reconnectTimerRef.current) {
@@ -439,6 +488,17 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
               ...prev,
               { type: "swarm_status", timestamp: msg.timestamp || new Date().toISOString(), data: msg.data || {} } as AgentEvent,
             ]);
+          } else if (msg.type === "worker_status") {
+            // Individual worker lifecycle — does NOT affect session status.
+            // Only the orchestrator's own "status" event ends the run.
+            const wid = msg.worker_id as number;
+            const wdata = (msg.data as string) || "";
+            if (wid != null) {
+              setOutput((prev) => [
+                ...prev,
+                `[Worker ${wid}] status: ${wdata}`,
+              ]);
+            }
           } else if (msg.type === "quality_gate_report") {
             // Quality gate report (backend emits "quality_gate_report", not "quality_gate_result")
             const gateData = msg.data || msg;
@@ -567,6 +627,36 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
               };
               return [ev, ...prev].slice(0, 100);
             });
+          } else if (msg.type === "lsp.diagnostics_update") {
+            const d = msg.data || msg;
+            const filePath = (d.file_path as string) || "";
+            const diags = (d.diagnostics as LspDiagnostic[]) || [];
+            setLspDiagnostics((prev) => ({ ...prev, [filePath]: diags }));
+          } else if (msg.type === "lsp.server_status") {
+            const d = msg.data || msg;
+            const serverId = `${d.language_id || ""}:${d.pid || ""}`;
+            setLspServerStatus((prev) => ({
+              ...prev,
+              [serverId]: d as unknown as LspServerInfo,
+            }));
+          } else if (msg.type === "lsp.code_health") {
+            const d = (msg.data || msg) as unknown as LspCodeHealth;
+            setLspCodeHealth(d);
+            setLspCodeHealthTrend((prev) => [...prev.slice(-19), d.score]);
+          } else if (msg.type === "lsp.cross_worker_alert") {
+            const d = (msg.data || msg) as unknown as LspCrossWorkerAlert;
+            d.timestamp = (msg.timestamp as string) || new Date().toISOString();
+            setLspCrossWorkerAlerts((prev) => [d, ...prev].slice(0, 50));
+          } else if (msg.type === "lsp.merge_validation") {
+            const d = msg.data || msg;
+            setEvents((prev) => [
+              ...prev,
+              {
+                type: "lsp.merge_validation",
+                timestamp: (msg.timestamp as string) || new Date().toISOString(),
+                data: d as Record<string, unknown>,
+              } as AgentEvent,
+            ]);
           } else if (msg.type && msg.timestamp && msg.type !== "output" && msg.type !== "status") {
             const safeData: Record<string, unknown> = {};
             if (msg.data && typeof msg.data === "object") {
@@ -664,5 +754,11 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
     workerTokenMap,
     watchdogEvents,
     circuitBreakerStatus,
+    // LSP
+    lspDiagnostics,
+    lspServerStatus,
+    lspCodeHealth,
+    lspCodeHealthTrend,
+    lspCrossWorkerAlerts,
   };
 }

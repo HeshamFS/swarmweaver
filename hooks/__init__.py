@@ -40,3 +40,8 @@ from hooks.main_hooks import (
     set_notification_callback,
     set_mail_store,
 )
+from hooks.lsp_hooks import (
+    set_lsp_context,
+    lsp_post_edit_hook,
+    lsp_diagnostic_watchdog_signal,
+)

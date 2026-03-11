@@ -192,6 +192,34 @@ swarmweaver watchdog nudge   WORKER_ID -p DIR -m "Please check test failures"
 
 Events are stored in `.swarmweaver/watchdog_events.db` (SQLite). Configuration is stored in `.swarmweaver/watchdog.yaml`.
 
+### LSP Code Intelligence
+
+Manage LSP language servers and inspect diagnostics. Requires an active or recent swarm session.
+
+```bash
+# Show running LSP servers and their status
+swarmweaver lsp status  -p DIR
+
+# View diagnostics (errors, warnings) across all files
+swarmweaver lsp diagnostics  -p DIR                     # all diagnostics
+swarmweaver lsp diagnostics  -p DIR -s error             # errors only
+swarmweaver lsp diagnostics  -p DIR -f "src/api/**"      # filter by file pattern
+swarmweaver lsp diagnostics  -p DIR -n 20                # limit to 20 entries
+
+# List all 22 available language server specs
+swarmweaver lsp servers  -p DIR
+
+# View or edit LSP configuration
+swarmweaver lsp config  -p DIR                           # show current config as JSON
+swarmweaver lsp config  -p DIR --set auto_install=false  # change a setting
+
+# Restart a specific language server
+swarmweaver lsp restart  -p DIR                          # restart all servers
+swarmweaver lsp restart  pyright -p DIR                  # restart specific server
+```
+
+Configuration is stored in `.swarmweaver/lsp.yaml`. See [configuration.md](configuration.md) for full reference.
+
 ## Legacy Invocation
 
 For backward compatibility:

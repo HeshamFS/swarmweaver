@@ -53,6 +53,11 @@ interface DispatchOverrideEntry {
   active: boolean;
 }
 
+export interface LspWorkerDiagnostics {
+  errors: number;
+  warnings: number;
+}
+
 export interface SwarmWorkersTabProps {
   workers: WorkerState[];
   numWorkers: number;
@@ -68,13 +73,17 @@ export interface SwarmWorkersTabProps {
   triageResults?: Record<number, TriageResult>;
   onTriageAccept?: (workerId: number, verdict: string) => void;
   onTriageOverride?: (workerId: number, action: string) => void;
+  lspWorkerDiagnostics?: Record<number, LspWorkerDiagnostics>;
 }
 
 const WORKER_STATUS_COLORS: Record<string, string> = {
   idle: "text-text-muted bg-surface border-border-subtle",
   working: "text-accent bg-accent/10 border-accent/30",
+  running: "text-accent bg-accent/10 border-accent/30",
   completed: "text-success bg-success/10 border-success/30",
+  merged: "text-purple-400 bg-purple-400/10 border-purple-400/30",
   error: "text-error bg-error/10 border-error/30",
+  terminated: "text-error bg-error/10 border-error/30",
   merging: "text-warning bg-warning/10 border-warning/30",
   rework: "text-orange-400 bg-orange-400/10 border-orange-400/30",
 };
@@ -82,8 +91,11 @@ const WORKER_STATUS_COLORS: Record<string, string> = {
 const WORKER_STATUS_ICONS: Record<string, string> = {
   idle: "\u25CB",
   working: "\u25B6",
+  running: "\u25B6",
   completed: "\u2713",
+  merged: "\u2714",
   error: "\u2717",
+  terminated: "\u2717",
   merging: "\u21BB",
   rework: "\u21BA",
 };
@@ -196,6 +208,7 @@ export function SwarmWorkersTab({
   triageResults,
   onTriageAccept,
   onTriageOverride,
+  lspWorkerDiagnostics,
 }: SwarmWorkersTabProps) {
   const activeOverrides = overrides?.filter((o) => o.active) ?? [];
 
@@ -352,6 +365,21 @@ export function SwarmWorkersTab({
                 <span className="text-[9px] text-text-muted font-mono">
                   {worker.status}
                 </span>
+                {/* LSP diagnostic badge */}
+                {lspWorkerDiagnostics?.[worker.worker_id] && (lspWorkerDiagnostics[worker.worker_id].errors > 0 || lspWorkerDiagnostics[worker.worker_id].warnings > 0) && (
+                  <span
+                    className={`text-[9px] font-mono px-1 py-0.5 rounded border ${
+                      lspWorkerDiagnostics[worker.worker_id].errors > 0
+                        ? "text-error bg-error/10 border-error/20"
+                        : "text-warning bg-warning/10 border-warning/20"
+                    }`}
+                    title={`${lspWorkerDiagnostics[worker.worker_id].errors}E ${lspWorkerDiagnostics[worker.worker_id].warnings}W`}
+                  >
+                    {lspWorkerDiagnostics[worker.worker_id].errors > 0 && `${lspWorkerDiagnostics[worker.worker_id].errors}E`}
+                    {lspWorkerDiagnostics[worker.worker_id].errors > 0 && lspWorkerDiagnostics[worker.worker_id].warnings > 0 && " "}
+                    {lspWorkerDiagnostics[worker.worker_id].warnings > 0 && `${lspWorkerDiagnostics[worker.worker_id].warnings}W`}
+                  </span>
+                )}
                 {/* Current task */}
                 {worker.current_task && (
                   <span className="text-[9px] text-accent font-mono truncate max-w-[150px]" title={worker.current_task}>
@@ -448,6 +476,24 @@ export function SwarmWorkersTab({
                     {ov.directive.replace(/_/g, " ")}
                   </span>
                 ))}
+                {/* LSP diagnostic badge */}
+                {lspWorkerDiagnostics?.[worker.worker_id] && (lspWorkerDiagnostics[worker.worker_id].errors > 0 || lspWorkerDiagnostics[worker.worker_id].warnings > 0) && (
+                  <span
+                    className={`text-[9px] font-mono px-1.5 py-0.5 rounded border inline-flex items-center gap-1 ${
+                      lspWorkerDiagnostics[worker.worker_id].errors > 0
+                        ? "text-error bg-error/10 border-error/20"
+                        : "text-warning bg-warning/10 border-warning/20"
+                    }`}
+                    title={`LSP: ${lspWorkerDiagnostics[worker.worker_id].errors} errors, ${lspWorkerDiagnostics[worker.worker_id].warnings} warnings`}
+                  >
+                    {lspWorkerDiagnostics[worker.worker_id].errors > 0 && (
+                      <span className="text-error">{lspWorkerDiagnostics[worker.worker_id].errors}E</span>
+                    )}
+                    {lspWorkerDiagnostics[worker.worker_id].warnings > 0 && (
+                      <span className="text-warning">{lspWorkerDiagnostics[worker.worker_id].warnings}W</span>
+                    )}
+                  </span>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 {/* Escalation level badge */}

@@ -45,6 +45,8 @@ from hooks import (
     set_project_dir,
     set_cleanup_on_stop,
     set_mail_store,
+    lsp_post_edit_hook,
+    lsp_diagnostic_watchdog_signal,
 )
 from hooks.marathon_hooks import (
     configure_marathon,
@@ -218,9 +220,11 @@ def create_client(
         "PostToolUse": [
             HookMatcher(matcher="Edit", hooks=[
                 progress_file_management_hook,  # Warn if progress file too large
+                lsp_post_edit_hook,             # LSP diagnostics after edit
             ]),
             HookMatcher(matcher="Write", hooks=[
                 shell_script_lf_hook,  # Normalize .sh files to LF (fix CRLF in WSL)
+                lsp_post_edit_hook,    # LSP diagnostics after write
             ]),
         ],
         "Stop": [HookMatcher(hooks=[stop_hook])],
@@ -233,6 +237,7 @@ def create_client(
             audit_log_hook,
             knowledge_injection_hook,
             mail_injection_hook,
+            lsp_diagnostic_watchdog_signal,
             # Marathon hooks for long-running sessions
             session_stats_hook,
             loop_detection_hook,

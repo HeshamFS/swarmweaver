@@ -26,6 +26,7 @@
 | Hooks (security, capability, marathon, heartbeat) | `hooks/` (security.py, capability_hooks.py, main_hooks.py, marathon_hooks.py) |
 | Agent loop, orchestrators, merge | `core/` (agent.py, engine.py, orchestrator.py, smart_orchestrator.py, merge_resolver.py) |
 | Watchdog health monitoring | `services/watchdog.py` (state machine, AI triage, circuit breaker, event store) |
+| LSP code intelligence | `services/lsp_client.py`, `lsp_manager.py`, `lsp_intelligence.py`, `lsp_tools.py`, `hooks/lsp_hooks.py` |
 | State persistence (tasks, sessions, budget) | `state/` (task_list.py, session_state.py, budget.py, mail.py, events.py) |
 | Mode capabilities (steering, memory, verification) | `features/` (steering.py, memory.py, verification.py, approval.py) |
 | API endpoints and models | `api/` (routers/, models.py, app.py) |
@@ -56,7 +57,8 @@
 - Six operation modes: greenfield, feature, refactor, fix, evolve, security
 - Git worktree isolation (merge or discard on completion)
 - Multi-agent swarm (static N or AI-orchestrated Smart Swarm) with inter-agent mail coordination
-- Enhanced watchdog health monitoring: 9-state forward-only state machine, 6-signal health evaluation, active heartbeat protocol, LLM-based AI triage with heuristic fallback, dependency-aware escalation, circuit breaker, per-worker resource monitoring, persistent SQLite event log, YAML-configurable thresholds (`swarmweaver watchdog` CLI)
+- Enhanced watchdog health monitoring: 9-state forward-only state machine, 7-signal health evaluation (including LSP diagnostic trend), active heartbeat protocol, LLM-based AI triage with heuristic fallback, dependency-aware escalation, circuit breaker, per-worker resource monitoring, persistent SQLite event log, YAML-configurable thresholds (`swarmweaver watchdog` CLI)
+- Native LSP code intelligence: 22 built-in language servers (auto-detect/install), per-worktree isolation, post-edit diagnostic injection, cross-worker diagnostic routing via mail, impact analysis, unused code detection, dependency graph, code health score, 13 REST endpoints, 5 CLI commands (`swarmweaver lsp`)
 - Approval gates, verification loop, security allowlist
 - Cross-project memory, budget tracking, cost analysis
 - Inter-agent mail system: typed payloads, context injection, attachments, dead letter queue, analytics (`swarmweaver mail` CLI)
@@ -74,6 +76,7 @@
 - `npm --prefix frontend run lint` — run frontend lint checks.
 - `pytest tests -q` — run backend test suite.
 - `pytest tests/test_watchdog_enhanced.py -v` — run watchdog health monitoring tests (60 tests).
+- `pytest tests/test_lsp.py -v` — run LSP code intelligence tests (82 tests).
 - `python tests/test_security.py` — run command-allowlist/security hook regression checks.
 
 ## Coding Style & Naming Conventions

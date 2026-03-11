@@ -210,7 +210,18 @@ class Swarm:
                 async def worker_on_event(event: dict) -> None:
                     # Prefix events with worker_id for frontend routing
                     event["worker_id"] = worker_id
-                    await self.emit(event)
+                    etype = event.get("type", "")
+                    # Never forward worker-level "status" events — they
+                    # would cause the frontend to treat a single worker
+                    # finishing as the entire run completing.
+                    if etype == "status":
+                        await self.emit({
+                            "type": "worker_status",
+                            "worker_id": worker_id,
+                            "data": event.get("data"),
+                        })
+                    else:
+                        await self.emit(event)
 
                 # Assign role based on worker position
                 role = assign_role(worker_id, task_ids, self.num_workers)
@@ -412,6 +423,7 @@ class SmartSwarm:
         self._stopped = False
         self._planning_engine: Optional[Engine] = None
         self._orchestrator = None  # SmartOrchestrator instance
+        self._steering_event = asyncio.Event()  # Wakes up wait_seconds on steering
 
     @staticmethod
     async def _noop_event(event: dict) -> None:
@@ -539,6 +551,7 @@ class SmartSwarm:
                     max_hours=self.max_hours,
                     phase_models=self.phase_models,
                     on_event=self._on_event,
+                    steering_event=self._steering_event,
                 )
                 await self._orchestrator.run()
 
@@ -553,6 +566,10 @@ class SmartSwarm:
                 "type": "error",
                 "data": f"SmartSwarm error: {e}\n{tb.format_exc()}",
             })
+
+    def notify_steering(self) -> None:
+        """Signal that a steering message is waiting — wakes up wait_seconds()."""
+        self._steering_event.set()
 
     async def stop(self) -> None:
         """Stop planning engine and/or orchestrator."""

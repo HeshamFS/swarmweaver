@@ -1,14 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import type { TriageResult } from "../hooks/useWebSocket";
 
-export interface TriageResult {
-  worker_id: number;
-  verdict: "retry" | "terminate" | "extend" | "escalate";
-  reasoning: string;
-  recommended_action: string;
-  timestamp: string;
-}
+export type { TriageResult };
 
 export interface TriagePanelProps {
   triage: TriageResult;
@@ -22,6 +17,7 @@ const VERDICT_COLORS: Record<string, string> = {
   terminate: "text-error bg-error/10 border-error/30",
   extend: "text-warning bg-warning/10 border-warning/30",
   escalate: "text-orange-400 bg-orange-400/10 border-orange-400/30",
+  reassign: "text-purple-400 bg-purple-400/10 border-purple-400/30",
 };
 
 const VERDICT_LABELS: Record<string, string> = {
@@ -29,6 +25,7 @@ const VERDICT_LABELS: Record<string, string> = {
   terminate: "Terminate",
   extend: "Extend",
   escalate: "Escalate",
+  reassign: "Reassign",
 };
 
 const OVERRIDE_OPTIONS = ["Retry", "Terminate", "Extend", "Ignore"];
@@ -68,7 +65,7 @@ export function TriagePanel({ triage, recentOutput, onAccept, onOverride }: Tria
       <div className="px-3 py-1.5 bg-surface-raised/50">
         <span className="text-[10px] text-text-muted font-mono">Recommended: </span>
         <span className="text-[10px] text-text-primary font-mono font-medium">
-          {triage.recommended_action}
+          {triage.recommended_action || "—"}
         </span>
       </div>
 

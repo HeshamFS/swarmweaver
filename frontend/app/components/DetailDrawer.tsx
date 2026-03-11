@@ -14,6 +14,7 @@ import { DrawerSection } from "./drawer/DrawerSection";
 import { TaskGraph } from "./TaskGraph";
 import { MemoryPanel } from "./MemoryPanel";
 import { SwarmPanel } from "./SwarmPanel";
+import { LSPPanel } from "./LSPPanel";
 
 export interface DetailDrawerProps {
   isOpen: boolean;
@@ -153,6 +154,11 @@ export function DetailDrawer({
   const { data: sessionStatsApi } = useApiPoll("session-stats", projectPath, isObserveTab, 15000);
   const { data: agentsData } = useApiPoll("agents", projectPath, isObserveTab, 15000);
   const { data: auditTimelineData } = useApiPoll("audit-timeline", projectPath, isObserveTab, 15000);
+  // LSP polls (observe tab)
+  const { data: lspStatusData } = useApiPoll("lsp/status", projectPath, isObserveTab, 10000);
+  const { data: lspDiagData } = useApiPoll("lsp/diagnostics", projectPath, isObserveTab, 10000);
+  const { data: lspHealthData } = useApiPoll("lsp/code-health", projectPath, isObserveTab, 10000);
+  const { data: lspStatsData } = useApiPoll("lsp/stats", projectPath, isObserveTab, 5000);
   // Docs tab polls
   const { data: checkpointsData } = useApiPoll("session-history", projectPath, isDocsTab, 15000);
   const { data: sessionChainData } = useApiPoll("session/chain", projectPath, isDocsTab, 15000);
@@ -198,6 +204,7 @@ export function DetailDrawer({
     checkpoints: "docs",
     mail: "swarm",
     merges: "swarm",
+    "code-intel": "observe",
   };
   useEffect(() => {
     if (activeSection && sectionToTab[activeSection]) {
@@ -319,6 +326,86 @@ export function DetailDrawer({
     const last = ev[ev.length - 1];
     return (last.data?.servers as ApiData[]) || [];
   }, [events]);
+
+  // LSP data transformations (API responses → LSPPanel prop shapes)
+  type LspDiag = { uri: string; line: number; character: number; end_line: number; end_character: number; severity: number; severity_label: string; message: string; source: string | null; code: string | number | null };
+  type LspServer = { language_id: string; server_name: string; status: "stopped" | "starting" | "ready" | "degraded" | "crashed"; root_uri: string; pid: number | null; started_at: string; restart_count: number; open_files: number; diagnostic_count: number; worker_id: number | null };
+  type LspHealth = { score: number; error_count: number; warning_count: number; info_count: number; hint_count: number; by_language: Record<string, { score: number; errors: number; warnings: number }> };
+
+  const lspDiagnostics = useMemo((): Record<string, LspDiag[]> => {
+    if (!lspDiagData) return {};
+    const diags = lspDiagData.diagnostics;
+    if (Array.isArray(diags)) {
+      const grouped: Record<string, LspDiag[]> = {};
+      for (const d of diags as ApiData[]) {
+        const uri = asStr(d.uri || d.file_path || d.file);
+        if (!grouped[uri]) grouped[uri] = [];
+        grouped[uri].push({
+          uri,
+          line: asNum(d.line),
+          character: asNum(d.character || d.col || d.start_char),
+          end_line: asNum(d.end_line || d.line),
+          end_character: asNum(d.end_character || d.end_col || d.end_char),
+          severity: asNum(d.severity, 1),
+          severity_label: asStr(d.severity_label || (asNum(d.severity) === 1 ? "Error" : asNum(d.severity) === 2 ? "Warning" : "Info")),
+          message: asStr(d.message),
+          source: (d.source as string) ?? null,
+          code: (d.code as string | number) ?? null,
+        });
+      }
+      return grouped;
+    }
+    if (typeof diags === "object" && diags != null) return diags as Record<string, LspDiag[]>;
+    return {};
+  }, [lspDiagData]);
+
+  const lspServerStatus = useMemo((): Record<string, LspServer> => {
+    if (!lspStatusData) return {};
+    const servers = lspStatusData.servers;
+    if (Array.isArray(servers)) {
+      const map: Record<string, LspServer> = {};
+      for (const s of servers as ApiData[]) {
+        const id = asStr(s.id || s.server_name || s.language_id);
+        map[id] = {
+          language_id: asStr(s.language_id),
+          server_name: asStr(s.server_name || s.name),
+          status: asStr(s.status, "stopped") as LspServer["status"],
+          root_uri: asStr(s.root_uri || s.root_path),
+          pid: s.pid != null ? asNum(s.pid) : null,
+          started_at: asStr(s.started_at),
+          restart_count: asNum(s.restart_count),
+          open_files: asNum(s.open_files || s.file_count),
+          diagnostic_count: asNum(s.diagnostic_count || s.diag_count),
+          worker_id: s.worker_id != null ? asNum(s.worker_id) : null,
+        };
+      }
+      return map;
+    }
+    if (typeof servers === "object" && servers != null) return servers as Record<string, LspServer>;
+    return {};
+  }, [lspStatusData]);
+
+  const lspCodeHealth = useMemo((): LspHealth | null => {
+    if (!lspHealthData) return null;
+    return {
+      score: asNum(lspHealthData.score, 100),
+      error_count: asNum(lspHealthData.error_count),
+      warning_count: asNum(lspHealthData.warning_count),
+      info_count: asNum(lspHealthData.info_count),
+      hint_count: asNum(lspHealthData.hint_count),
+      by_language: (lspHealthData.by_language as Record<string, { score: number; errors: number; warnings: number }>) ?? {},
+    };
+  }, [lspHealthData]);
+
+  const [lspCodeHealthTrend, setLspCodeHealthTrend] = useState<number[]>([]);
+  useEffect(() => {
+    if (lspCodeHealth) {
+      setLspCodeHealthTrend((prev) => {
+        const next = [...prev, lspCodeHealth.score];
+        return next.length > 30 ? next.slice(-30) : next;
+      });
+    }
+  }, [lspCodeHealth]);
 
   // Fall back through: live WS → REST API → native event count → insights
   const mergedToolCallCount: number =
@@ -869,6 +956,27 @@ export function DetailDrawer({
                 ) : (
                   <p className="text-xs font-mono text-[#555]">No tracked processes</p>
                 )}
+              </DrawerSection>
+
+              <DrawerSection
+                title="Code Intel"
+                icon={<span className="text-xs font-mono">{"\u2726"}</span>}
+                count={(() => { const n = Object.values(lspDiagnostics).reduce((sum, arr) => sum + arr.length, 0); return n > 0 ? n : undefined; })()}
+                forceOpen={activeSection === "code-intel" ? true : undefined}
+              >
+                <div className="min-h-[280px] -mx-2 -mb-2">
+                  <LSPPanel
+                    diagnostics={lspDiagnostics}
+                    serverStatus={lspServerStatus}
+                    codeHealth={lspCodeHealth}
+                    codeHealthTrend={lspCodeHealthTrend}
+                    crossWorkerAlerts={[]}
+                    projectDir={projectPath || ""}
+                    isTeamMode={isSwarmMode}
+                    workerCount={0}
+                    stats={lspStatsData as any ?? undefined}
+                  />
+                </div>
               </DrawerSection>
               </>
               )}

@@ -210,6 +210,10 @@ class WorkerHealth:
     # Nudge tracking
     nudge_count: int = 0
     last_nudge_time: float = 0.0
+    # LSP diagnostic trend (7th health signal)
+    lsp_error_count: int = 0
+    lsp_error_trend: str = ""  # "rising", "falling", "stable"
+    _lsp_error_history: list = field(default_factory=list)
 
     def to_dict(self) -> dict:
         d = {
@@ -230,6 +234,8 @@ class WorkerHealth:
             "boot_time": self.boot_time,
             "resource_usage": self.resource_usage,
             "nudge_count": self.nudge_count,
+            "lsp_error_count": self.lsp_error_count,
+            "lsp_error_trend": self.lsp_error_trend,
         }
         d["last_output_ago_seconds"] = (
             int(time.time() - self.last_output_time)
@@ -611,6 +617,7 @@ class SwarmWatchdog:
         self._events: list[WatchdogEvent] = []
         self._triage_results: dict[int, dict] = {}
         self._run_complete_sent = False
+        self._auto_run_complete = True  # Set False when orchestrator manages completion
 
         # Enhanced components
         self.heartbeat = HeartbeatProtocol()
@@ -871,6 +878,23 @@ class SwarmWatchdog:
         # Signal 6: Heartbeat data
         last_hb = self.heartbeat.get_last_heartbeat(health.worker_id)
         hb_elapsed = time.time() - last_hb if last_hb else float("inf")
+
+        # Signal 7: LSP diagnostic trend
+        if health.lsp_error_count > 0:
+            health._lsp_error_history.append(health.lsp_error_count)
+            if len(health._lsp_error_history) > 10:
+                health._lsp_error_history = health._lsp_error_history[-10:]
+            if len(health._lsp_error_history) >= 3:
+                recent = health._lsp_error_history[-3:]
+                if recent[-1] > recent[-2] > recent[-3]:
+                    health.lsp_error_trend = "rising"
+                    if health.status in (AgentState.WORKING, AgentState.IDLE):
+                        self._transition(health, AgentState.WARNING,
+                                         f"LSP errors rising: {recent}")
+                elif recent[-1] < recent[-2]:
+                    health.lsp_error_trend = "falling"
+                else:
+                    health.lsp_error_trend = "stable"
 
         # Determine effective freshness — use the most recent signal
         effective_elapsed = min(
@@ -1386,6 +1410,8 @@ Respond with ONLY the JSON object, no markdown fencing."""
 
     async def _check_run_completion(self) -> bool:
         """Detect when all non-persistent workers are done."""
+        if not self._auto_run_complete:
+            return False
         if self._run_complete_sent:
             return False
 

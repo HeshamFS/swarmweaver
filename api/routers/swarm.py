@@ -43,6 +43,7 @@ async def get_swarm_status(
                             "branch_name": w.get("branch_name"),
                             "started_at": w.get("started_at"),
                             "completed_at": w.get("completed_at"),
+                            "merge_tier": w.get("merge_tier"),
                         }
                         for w in workers
                     ],

@@ -187,6 +187,10 @@ class ProjectPaths:
     def agents_dir(self) -> Path:
         return self.swarmweaver_dir /"agents"
 
+    @property
+    def lsp_config(self) -> Path:
+        return self.swarmweaver_dir / "lsp.yaml"
+
     # ------------------------------------------------------------------
     # Artifact lookup
     # ------------------------------------------------------------------

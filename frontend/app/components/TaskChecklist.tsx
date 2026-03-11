@@ -11,7 +11,15 @@ interface TaskChecklistProps {
 }
 
 export function TaskChecklist({ tasks, onTaskClick, className = "", expanded }: TaskChecklistProps) {
-  const taskList = useMemo(() => tasks ?? [], [tasks]);
+  const taskList = useMemo(() => {
+    const raw = tasks ?? [];
+    // Deduplicate by task.id — keep last occurrence (most up-to-date status)
+    const seen = new Map<string, Task>();
+    for (const t of raw) {
+      seen.set(t.id, t);
+    }
+    return Array.from(seen.values());
+  }, [tasks]);
 
   if (taskList.length === 0) return null;
   if (!expanded) return null;

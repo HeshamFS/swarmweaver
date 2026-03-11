@@ -10,6 +10,22 @@ from core.models import DEFAULT_MODEL
 # Track active native engines for stop support
 _running_engines: dict[str, Engine] = {}
 
+# Track active LSP managers per project path
+_lsp_managers: dict = {}
+
+
+def get_lsp_manager(path: str):
+    """Get LSPManager for a project path, or None if not initialized."""
+    key = str(Path(path).resolve())
+    return _lsp_managers.get(key)
+
+
+def set_lsp_manager(path: str, manager):
+    """Register an LSP manager for a project path."""
+    key = str(Path(path).resolve())
+    _lsp_managers[key] = manager
+
+
 # Directories to scan for projects (configurable via SWARMWEAVER_PROJECT_DIRS env var)
 # Defaults to: generations/ dir + the parent dir of this script
 _default_scan_dirs = [

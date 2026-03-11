@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import type { TriageResult } from "../hooks/useWebSocket";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -43,15 +44,6 @@ interface CircuitBreakerStatus {
   successes_in_window: number;
 }
 
-interface TriageResultData {
-  worker_id: number;
-  verdict: "retry" | "terminate" | "extend" | "reassign";
-  reasoning: string;
-  confidence: number;
-  recommended_action?: string;
-  suggested_nudge_message?: string;
-}
-
 interface WatchdogConfig {
   enabled: boolean;
   check_interval_s: number;
@@ -75,7 +67,7 @@ interface WatchdogPanelProps {
   projectDir: string;
   watchdogEvents?: WatchdogEvent[];
   circuitBreakerStatus?: CircuitBreakerStatus | null;
-  triageResults?: Record<number, TriageResultData>;
+  triageResults?: Record<number, TriageResult>;
 }
 
 // ── State badge colors ───────────────────────────────────────────
@@ -332,7 +324,7 @@ export function WatchdogPanel({
           <div>
             <div className="text-text-muted mb-1.5 uppercase tracking-wider text-[10px]">Triage Results</div>
             {Object.entries(triageResults).map(([wid, tr]) => {
-              const verdictColor = { retry: "text-amber-400", extend: "text-cyan-400", reassign: "text-purple-400", terminate: "text-red-400" }[tr.verdict] || "text-text-secondary";
+              const verdictColor = ({ retry: "text-amber-400", extend: "text-cyan-400", reassign: "text-purple-400", terminate: "text-red-400", escalate: "text-orange-400" } as Record<string, string>)[tr.verdict] || "text-text-secondary";
               return (
                 <div key={wid} className="border border-border-subtle rounded p-2 bg-surface-raised mb-1.5">
                   <div className="flex items-center justify-between mb-1">

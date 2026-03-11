@@ -263,6 +263,13 @@ async def _ws_run_native(
                             msg.get("message", ""),
                             steering_type,
                         )
+                        # Wake up any sleeping wait_seconds() so the
+                        # orchestrator sees the message without delay.
+                        if hasattr(engine, "notify_steering"):
+                            try:
+                                engine.notify_steering()
+                            except Exception:
+                                pass
                 elif msg_type == "approval_resolve":
                     from features.approval import resolve_approval as _resolve
                     _resolve(

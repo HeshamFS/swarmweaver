@@ -101,6 +101,13 @@ swarmweaver watchdog config  -p DIR               # show or edit watchdog.yaml
 swarmweaver watchdog triage  WORKER_ID -p DIR     # trigger AI triage
 swarmweaver watchdog nudge   WORKER_ID -p DIR     # send nudge to a worker
 
+# LSP code intelligence
+swarmweaver lsp status       -p DIR               # show running language servers
+swarmweaver lsp diagnostics  -p DIR [-s SEVERITY] [-f PATH] [-n LIMIT]
+swarmweaver lsp servers      -p DIR               # list all 22 available server specs
+swarmweaver lsp config       -p DIR [--set KEY=VALUE]
+swarmweaver lsp restart      [SERVER_ID] -p DIR   # restart language servers
+
 # Legacy shim (backward compatible — calls cli/main.py internally)
 python autonomous_agent_demo.py feature --project-dir ./app --description "..."
 
@@ -157,6 +164,7 @@ swarmweaver/                  # Project root (SwarmWeaver)
 │   ├── main_hooks.py             # Server/env/file mgmt, steering, audit, cleanup
 │   ├── marathon_hooks.py         # Auto-commit, health, loop detection, stats, resources, heartbeat
 │   ├── capability_hooks.py       # Role-based capability enforcement per agent type
+│   ├── lsp_hooks.py              # Post-edit LSP diagnostics, cross-worker routing, watchdog signal
 │   └── security.py               # Bash command allowlist validation
 ├── state/                      # Task list, sessions, processes, budget, mail, events
 │   ├── task_list.py              # Universal task list with dependencies and verification
@@ -188,9 +196,13 @@ swarmweaver/                  # Project root (SwarmWeaver)
 │   ├── adr.py                    # Architecture Decision Record manager
 │   ├── replay.py                 # Session replay via git commit history
 │   ├── monitor.py                # Fleet health monitor
-│   ├── watchdog.py               # SwarmWatchdog: 9-state machine, 6-signal health, AI triage, circuit breaker, SQLite event log
+│   ├── watchdog.py               # SwarmWatchdog: 9-state machine, 7-signal health, AI triage, circuit breaker, SQLite event log
 │   ├── timeline.py               # Cross-agent event timeline
 │   ├── mcp_manager.py            # MCP server config store (two-level merge, CRUD, validate, test)
+│   ├── lsp_client.py             # JSON-RPC 2.0 LSP client (14 operations, Content-Length framing)
+│   ├── lsp_manager.py            # 22 built-in language servers, lifecycle, auto-detect/install
+│   ├── lsp_intelligence.py       # Impact analysis, unused code, dependency graph, health score
+│   ├── lsp_tools.py              # Worker MCP tools (lsp_query, lsp_diagnostics_summary)
 │   ├── transcript_costs.py       # Transcript-based cost analysis
 │   └── logger.py                 # Structured logging
 ├── utils/                      # API keys, progress, sanitizer, safe logging
@@ -287,6 +299,10 @@ Decision logic in `main()` and server: `smart_swarm` → SmartSwarm; `parallel >
 | `services/transcript_costs.py` | Transcript-based cost analysis: per-agent, per-model, with cache pricing |
 | `services/insights.py` | Session insight analyzer: top tools, hot files, error frequency |
 | `services/mcp_manager.py` | MCP server config store: two-level merge, CRUD, validate, test, import/export |
+| `services/lsp_client.py` | JSON-RPC 2.0 LSP client over stdio: 14 operations, Content-Length framing |
+| `services/lsp_manager.py` | 22 built-in language servers, lifecycle, auto-detect, auto-install, health loop |
+| `services/lsp_intelligence.py` | Impact analysis, unused code detection, dependency graph, code health score |
+| `services/lsp_tools.py` | Worker MCP tools: `lsp_query` (13 operations), `lsp_diagnostics_summary` |
 | `state/mail.py` | Inter-agent MailStore: typed payloads, context injection, attachments, dead letters, rate limiting, analytics |
 | `web_search_server.py` | MCP server that wraps Claude's web search tool for agent use |
 
@@ -412,6 +428,7 @@ Key endpoint categories:
 | Watchdog | `GET /api/watchdog/events`, `GET /api/watchdog/config`, `PUT /api/watchdog/config` |
 | Fleet | `GET /api/fleet/health` |
 | MCP | `GET/POST/PUT/DELETE /api/mcp/servers`, `POST /api/mcp/servers/{name}/enable\|disable\|test`, `POST /api/mcp/servers/validate`, `GET /api/mcp/export`, `POST /api/mcp/import` |
+| LSP | `GET /api/lsp/status`, `GET /api/lsp/diagnostics`, `POST /api/lsp/hover\|definition\|references\|symbols\|call-hierarchy`, `GET /api/lsp/servers`, `POST /api/lsp/servers/{id}/restart`, `GET/PUT /api/lsp/config`, `GET /api/lsp/impact-analysis`, `GET /api/lsp/code-health` |
 | Health | `GET /api/doctor` |
 | Files | `GET /api/browse`, `POST /api/mkdir` |
 | WebSocket | `WS /ws/run`, `WS /ws/architect`, `WS /ws/plan`, `WS /ws/wizard` |
@@ -453,7 +470,8 @@ All SwarmWeaver artifacts are consolidated under `.swarmweaver/` — delete it a
 │   ├── mail.db                      # Inter-agent mail (typed payloads, attachments, dead letters, analytics)
 │   ├── events.db                    # Structured event store
 │   ├── watchdog.yaml                # Watchdog health monitor configuration
-│   └── watchdog_events.db           # Persistent watchdog event log (SQLite)
+│   ├── watchdog_events.db           # Persistent watchdog event log (SQLite)
+│   └── lsp.yaml                    # LSP code intelligence configuration
 ├── init.sh                        # Environment setup script (greenfield, stays at root)
 └── docs/adr/                      # Architecture Decision Records (stays at root)
 ```

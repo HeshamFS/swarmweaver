@@ -341,6 +341,59 @@ def create_orchestrator_tool_server(orchestrator: Any):
             "triage": triage_result,
         })}]}
 
+    @tool(
+        "analyze_code_structure",
+        "Analyze codebase symbol graph using LSP for optimal task partitioning. "
+        "Uses workspace symbols and call hierarchy to build a file dependency graph. "
+        "Returns symbols, file_dependencies, connected_components, and suggested_groupings. "
+        "Call this BEFORE spawning workers to understand which files are tightly coupled.",
+        {
+            "type": "object",
+            "properties": {
+                "entry_files": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional: specific files to analyze (if omitted, analyzes entire workspace)",
+                },
+            },
+            "required": [],
+        },
+    )
+    async def analyze_code_structure(args: dict[str, Any]) -> dict[str, Any]:
+        lsp_manager = getattr(orchestrator, "_lsp_manager", None)
+        if not lsp_manager:
+            return {"content": [{"type": "text", "text": _format_result({
+                "error": "LSP not available — partitioning will use file overlap heuristics instead",
+            })}]}
+
+        try:
+            from services.lsp_intelligence import CodeIntelligence
+            intel = CodeIntelligence(lsp_manager)
+            entry_files = args.get("entry_files")
+            graph = await intel.dependency_graph(
+                str(orchestrator.project_dir),
+                entry_files=entry_files,
+            )
+            health = await intel.code_health_score()
+            result = {
+                "dependency_graph": {
+                    "nodes": len(graph.get("nodes", [])),
+                    "edges": len(graph.get("edges", [])),
+                    "clusters": len(graph.get("clusters", [])),
+                },
+                "suggested_groupings": [
+                    sorted(c) for c in graph.get("clusters", [])
+                ],
+                "code_health": health,
+                "recommendation": (
+                    f"Found {len(graph.get('clusters', []))} connected file clusters. "
+                    "Assign each cluster to a separate worker for minimal merge conflicts."
+                ),
+            }
+        except Exception as e:
+            result = {"error": f"LSP analysis failed: {e}"}
+        return {"content": [{"type": "text", "text": _format_result(result)}]}
+
     return create_sdk_mcp_server(
         "orchestrator_tools",
         version="1.0.0",
@@ -359,6 +412,7 @@ def create_orchestrator_tool_server(orchestrator: Any):
             signal_complete,
             wait_seconds,
             analyze_stalled_worker,
+            analyze_code_structure,
         ],
     )
 
@@ -379,6 +433,7 @@ ORCHESTRATOR_TOOL_NAMES = [
     "mcp__orchestrator_tools__signal_complete",
     "mcp__orchestrator_tools__wait_seconds",
     "mcp__orchestrator_tools__analyze_stalled_worker",
+    "mcp__orchestrator_tools__analyze_code_structure",
 ]
 
 

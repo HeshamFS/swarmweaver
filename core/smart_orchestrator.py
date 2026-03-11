@@ -292,6 +292,7 @@ class SmartOrchestrator:
         max_hours: float = 0.0,
         phase_models: Optional[dict] = None,
         on_event: Optional[OnEventCallback] = None,
+        steering_event: Optional[asyncio.Event] = None,
     ):
         self.project_dir = Path(project_dir)
         self.mode = mode
@@ -302,11 +303,13 @@ class SmartOrchestrator:
         self.max_hours = max_hours
         self.phase_models = phase_models
         self._on_event = on_event or self._noop
+        self._steering_event = steering_event or asyncio.Event()
 
         self._workers: dict[int, WorkerHandle] = {}
         self._next_worker_id = 1
         self._stopped = False
         self._complete = False
+        self._current_client = None  # ClaudeSDKClient — set during run() for steering
         self._decisions: list[dict] = []
         self._mail = MailStore(self.project_dir)
         self._merge_resolver = MergeResolver(self.project_dir)
@@ -324,6 +327,26 @@ class SmartOrchestrator:
         except OSError:
             pass  # May already exist or be a ghost file — handled during spawn
 
+        # LSP integration — per-worktree language servers
+        self._lsp_manager = None
+        self._lsp_health_task: Optional[asyncio.Task] = None
+        try:
+            from services.lsp_manager import LSPManager, LSPConfig
+            lsp_config = LSPConfig.load(self.project_dir)
+            if lsp_config.enabled:
+                self._lsp_manager = LSPManager(
+                    self.project_dir, lsp_config, on_event=self._emit_sync
+                )
+                # Register with API state so REST endpoints can access it
+                try:
+                    from api.state import set_lsp_manager
+                    set_lsp_manager(str(self.project_dir), self._lsp_manager)
+                except ImportError:
+                    pass  # API module may not be loaded in CLI-only mode
+                print("[ORCHESTRATOR] LSP manager initialized", flush=True)
+        except Exception as e:
+            print(f"[ORCHESTRATOR] LSP init failed (non-fatal): {e}", flush=True)
+
         # Enhanced watchdog (W4-4)
         self._watchdog = None
         self._watchdog_task: Optional[asyncio.Task] = None
@@ -337,12 +360,26 @@ class SmartOrchestrator:
                     project_dir=self.project_dir,
                     on_event=self._on_watchdog_event,
                 )
+                # Orchestrator manages completion via signal_complete —
+                # don't let watchdog fire premature run_complete events.
+                self._watchdog._auto_run_complete = False
         except Exception as e:
             print(f"[ORCHESTRATOR] Watchdog init failed (non-fatal): {e}", flush=True)
 
     @staticmethod
     async def _noop(event: dict) -> None:
         pass
+
+    def _emit_sync(self, event: dict) -> None:
+        """Fire-and-forget emit (for callbacks that can't be async)."""
+        import asyncio as _aio
+        try:
+            if "timestamp" not in event:
+                event["timestamp"] = datetime.utcnow().isoformat() + "Z"
+            loop = _aio.get_running_loop()
+            loop.create_task(self._on_event(event))
+        except RuntimeError:
+            pass
 
     def _on_watchdog_event(self, event: dict) -> None:
         """Forward watchdog events to the main on_event callback."""
@@ -402,6 +439,13 @@ class SmartOrchestrator:
                 self._watchdog_task = asyncio.create_task(self._watchdog.run())
                 print("[ORCHESTRATOR] Watchdog monitoring started", flush=True)
 
+            # Start LSP health monitoring loop
+            if self._lsp_manager:
+                self._lsp_health_task = asyncio.create_task(
+                    self._lsp_manager.run_health_loop()
+                )
+                print("[ORCHESTRATOR] LSP health loop started", flush=True)
+
             # Analyse tasks
             tl = TaskList(self.project_dir)
             tl.load()
@@ -426,6 +470,7 @@ class SmartOrchestrator:
             for attempt in range(max_retries + 1):
                 try:
                     client = self._create_orchestrator_client(tool_server)
+                    self._current_client = client
                     async with client:
                         # Single continuous query — the orchestrator stays connected
                         # and uses wait_seconds() to pace itself between monitoring checks.
@@ -911,8 +956,20 @@ class SmartOrchestrator:
 
         async def worker_on_event(event: dict) -> None:
             event["worker_id"] = worker_id
-            await self.emit(event)
             etype = event.get("type", "")
+
+            # Never forward worker-level "status" events — they would
+            # cause the frontend to treat a single worker finishing as
+            # the entire run completing.  Re-label them so the UI can
+            # distinguish worker lifecycle from orchestrator lifecycle.
+            if etype == "status":
+                await self.emit({
+                    "type": "worker_status",
+                    "worker_id": worker_id,
+                    "data": event.get("data"),
+                })
+            else:
+                await self.emit(event)
             evdata = event.get("data", {}) if isinstance(event.get("data"), dict) else {}
 
             # Report activity to watchdog (W4-4)
@@ -1135,6 +1192,29 @@ class SmartOrchestrator:
         # merge sync copies worktree -> main. mail_project_dir=main for report_to_orchestrator.
         worker_max_budget = 2.0   # $2 per worker max — prevents runaway costs
         worker_max_turns = 200    # bounded turns — prevents infinite loops
+        # Spawn per-worktree LSP servers for detected languages
+        if self._lsp_manager:
+            try:
+                detected = self._lsp_manager.detect_languages(worktree_path)
+                lsp_cfg = self._lsp_manager._config
+                # Deduplicate: resolve each lang to its server spec, spawn once per server
+                seen_servers: set[str] = set()
+                spawned = 0
+                for lang in detected:
+                    if spawned >= lsp_cfg.max_servers_per_worktree:
+                        break
+                    spec = self._lsp_manager._resolve_spec(lang, Path(worktree_path))
+                    if spec is None or spec.server_name in seen_servers:
+                        continue
+                    seen_servers.add(spec.server_name)
+                    await self._lsp_manager.ensure_server(
+                        lang, worktree_path, worker_id=str(worker_id)
+                    )
+                    spawned += 1
+                print(f"[WORKER {name}] LSP servers spawned: {list(seen_servers)}", flush=True)
+            except Exception as e:
+                print(f"[WORKER {name}] LSP server spawn failed (non-fatal): {e}", flush=True)
+
         engine_kwargs = dict(
             project_dir=str(worktree_path),
             mode=self.mode,
@@ -1150,6 +1230,8 @@ class SmartOrchestrator:
             mail_project_dir=self.project_dir,
             max_budget_usd=worker_max_budget,
             max_turns=worker_max_turns,
+            lsp_manager=self._lsp_manager,
+            file_scope=file_scope,
         )
         try:
             engine = Engine(**engine_kwargs)
@@ -1512,6 +1594,38 @@ class SmartOrchestrator:
             handle.status = "merged"
             handle.merge_tier = resolution.tier.value if resolution else "unknown"
 
+            # Post-merge LSP diagnostic validation
+            post_merge_errors = []
+            if self._lsp_manager and resolution and resolution.success:
+                try:
+                    changed_files = []
+                    ok_diff, diff_out = self._git("diff", "--name-only", "HEAD~1", timeout=10)
+                    if ok_diff and diff_out.strip():
+                        changed_files = [f.strip() for f in diff_out.strip().split("\n") if f.strip()]
+                    for f in changed_files[:20]:
+                        fpath = self.project_dir / f
+                        if fpath.exists() and fpath.is_file():
+                            try:
+                                content = fpath.read_text(encoding="utf-8")
+                                diags = await self._lsp_manager.notify_file_changed(str(fpath), content)
+                                post_merge_errors.extend([d for d in diags if d.severity == 1])
+                            except Exception:
+                                pass
+                    if post_merge_errors:
+                        await self.emit({
+                            "type": "lsp.merge_validation",
+                            "data": {
+                                "worker_id": wid,
+                                "error_count": len(post_merge_errors),
+                                "errors": [
+                                    {"file": d.uri, "line": d.range_start_line + 1, "message": d.message}
+                                    for d in post_merge_errors[:10]
+                                ],
+                            },
+                        })
+                except Exception as e:
+                    print(f"[ORCHESTRATOR] Post-merge LSP validation failed: {e}", flush=True)
+
             await self.emit({
                 "type": "worker_merged",
                 "data": {
@@ -1519,6 +1633,7 @@ class SmartOrchestrator:
                     "resolution_tier": handle.merge_tier,
                     "success": resolution.success if resolution else False,
                     "tasks_synced": synced,
+                    "post_merge_errors": len(post_merge_errors),
                 },
             })
             self._record_decision(f"Merged {handle.name} via tier {handle.merge_tier} ({synced} tasks synced)")
@@ -1864,13 +1979,25 @@ class SmartOrchestrator:
         During the wait, worker asyncio tasks continue running and streaming
         events to the frontend. After the wait, we check for finished workers
         and collect any new mail messages so the orchestrator gets fresh status.
+
+        The sleep breaks early if a steering message arrives (via
+        self._steering_event), so operator directives are delivered promptly.
         """
         seconds = min(max(args.get("seconds", 30), 1), 120)
         print(f"[ORCHESTRATOR] Waiting {seconds}s (workers continue running)...", flush=True)
 
-        # Sleep in 1-second increments so we can respond quickly to stop signals
-        for _ in range(seconds):
+        # Clear any stale steering signal before sleeping
+        self._steering_event.clear()
+
+        # Sleep in 1-second increments; break early on stop or steering
+        steering_arrived = False
+        for i in range(seconds):
             if self._stopped:
+                break
+            if self._steering_event.is_set():
+                self._steering_event.clear()
+                steering_arrived = True
+                print(f"[ORCHESTRATOR] Wait interrupted by steering message at {i}s/{seconds}s", flush=True)
                 break
             await asyncio.sleep(1)
 
@@ -1926,7 +2053,7 @@ class SmartOrchestrator:
             if w.status in ("completed", "error") and w.merge_tier == ""
         ]
 
-        return {
+        result: dict = {
             "success": True,
             "waited_seconds": seconds,
             "worker_updates": updates or "No new messages.",
@@ -1934,6 +2061,38 @@ class SmartOrchestrator:
             "finished_unmerged": finished_workers,
             "task_progress": f"{done}/{total} done (main list), {in_progress} in progress, {pending} pending",
         }
+
+        # Check for steering messages and include directly in response
+        # so the orchestrator reads them immediately.
+        if steering_arrived:
+            try:
+                from features.steering import read_steering_message, mark_steering_processed
+                msg = read_steering_message(self.project_dir)
+                if msg:
+                    mark_steering_processed(self.project_dir)
+                    if msg.steering_type == "abort":
+                        result["OPERATOR_DIRECTIVE"] = (
+                            "ABORT requested by operator. "
+                            "Stop all work immediately. Merge what you can and call signal_complete."
+                        )
+                    elif msg.steering_type == "reflect":
+                        result["OPERATOR_DIRECTIVE"] = (
+                            f"REFLECTION REQUESTED by operator:\n\n"
+                            f"{msg.message}\n\n"
+                            f"Re-evaluate your plan in light of this feedback. "
+                            f"Adjust worker assignments, spawn/terminate workers as needed."
+                        )
+                    else:
+                        result["OPERATOR_DIRECTIVE"] = (
+                            f"INSTRUCTION from operator (you MUST follow this):\n\n"
+                            f"{msg.message}\n\n"
+                            f"Adjust your orchestration strategy accordingly."
+                        )
+                    print(f"[ORCHESTRATOR] Delivered steering to orchestrator: {msg.steering_type}", flush=True)
+            except Exception as e:
+                print(f"[ORCHESTRATOR] Steering read failed: {e}", flush=True)
+
+        return result
 
     # ------------------------------------------------------------------
     # Prompt Builders
@@ -2201,6 +2360,16 @@ spawn new workers for remaining tasks, and call signal_complete when all done.""
                     pass
                 if not w.task.done():
                     w.task.cancel()
+
+        # 1b. Stop LSP servers and health loop
+        if self._lsp_health_task and not self._lsp_health_task.done():
+            self._lsp_health_task.cancel()
+        if self._lsp_manager:
+            try:
+                await self._lsp_manager.stop_all()
+                print("[CLEANUP] LSP servers stopped", flush=True)
+            except Exception as e:
+                print(f"[CLEANUP] LSP cleanup failed: {e}", flush=True)
 
         # 2. Wait for all worker tasks to finish (give them a few seconds)
         pending_tasks = [w.task for w in self._workers.values() if not w.task.done()]
