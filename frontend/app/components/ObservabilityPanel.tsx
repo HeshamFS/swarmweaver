@@ -12,6 +12,8 @@ import type { EventStoreResponse, ToolStatEntry } from "./AuditView";
 import { ProfileView } from "./ProfileView";
 import type { CodebaseProfile } from "./ProfileView";
 import { LSPPanel } from "./LSPPanel";
+import { SessionBrowserPanel } from "./SessionBrowserPanel";
+import { SnapshotPanel } from "./SnapshotPanel";
 
 interface BudgetData {
   total_input_tokens: number;
@@ -38,7 +40,7 @@ interface ObservabilityPanelProps {
   status?: AgentStatus;
 }
 
-type TabId = "timeline" | "files" | "costs" | "errors" | "audit" | "profile" | "insights" | "agents" | "checkpoints" | "code-intel";
+type TabId = "timeline" | "files" | "costs" | "errors" | "audit" | "profile" | "insights" | "agents" | "checkpoints" | "sessions" | "code-intel";
 
 const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: "timeline", label: "Timeline", icon: "\u23F1" },
@@ -49,6 +51,7 @@ const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: "insights", label: "Insights", icon: "\u{1F4CA}" },
   { id: "agents", label: "Agents", icon: "\u{1F916}" },
   { id: "checkpoints", label: "Checkpts", icon: "\u23F1" },
+  { id: "sessions", label: "Sessions", icon: "\u{1F4C2}" },
   { id: "profile", label: "Profile", icon: "\u{1F4CB}" },
   { id: "code-intel", label: "Code Intel", icon: "\u{1F9E0}" },
 ];
@@ -629,7 +632,15 @@ export function ObservabilityPanel({
         {activeTab === "audit" && <AuditView loading={!eventStoreData} events={events} eventStoreData={eventStoreData} toolStats={toolStats} />}
         {activeTab === "insights" && projectDir && <InsightsPanel projectDir={projectDir} />}
         {activeTab === "agents" && projectDir && <AgentIdentityPanel projectDir={projectDir} status={status} />}
-        {activeTab === "checkpoints" && projectDir && <CheckpointPanel projectDir={projectDir} status={status} />}
+        {activeTab === "checkpoints" && projectDir && (
+          <div className="flex flex-col h-full">
+            <SnapshotPanel projectDir={projectDir} status={status} />
+            <div className="border-t border-border-subtle">
+              <CheckpointPanel projectDir={projectDir} status={status} />
+            </div>
+          </div>
+        )}
+        {activeTab === "sessions" && projectDir && <SessionBrowserPanel projectDir={projectDir} />}
         {activeTab === "profile" && <ProfileView profile={codebaseProfile} loading={profileLoading} />}
         {activeTab === "code-intel" && (
           <LSPPanel

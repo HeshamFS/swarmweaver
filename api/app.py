@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.routers import runs, tasks, swarm, worktree, budget, github
 from api.routers import projects, sessions, settings, system, wizard
 from api.routers import mcp, lsp, expertise
+from api.routers import session_history, snapshots
 from api.websocket import run as ws_run, wizard as ws_wizard
 
 
@@ -40,6 +41,8 @@ def create_app() -> FastAPI:
     app.include_router(mcp.router)
     app.include_router(lsp.router)
     app.include_router(expertise.router)
+    app.include_router(session_history.router)
+    app.include_router(snapshots.router)
 
     # WebSocket routers
     app.include_router(ws_run.router)

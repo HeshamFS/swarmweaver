@@ -14,6 +14,15 @@ import { DrawerSection } from "./drawer/DrawerSection";
 import { TaskGraph } from "./TaskGraph";
 import { SwarmPanel } from "./SwarmPanel";
 import { LSPPanel } from "./LSPPanel";
+import { SessionBrowserPanel } from "./SessionBrowserPanel";
+import { SnapshotPanel } from "./SnapshotPanel";
+import { CostPanel } from "./CostPanel";
+import { TimelinePanel } from "./TimelinePanel";
+import { ProcessPanel } from "./ProcessPanel";
+import { SessionChainPanel } from "./SessionChainPanel";
+import { RunHistoryPanel } from "./RunHistoryPanel";
+import { SpecPanel } from "./SpecPanel";
+import { TaskGroupPanel } from "./TaskGroupPanel";
 
 export interface DetailDrawerProps {
   isOpen: boolean;
@@ -115,6 +124,14 @@ function useApiPoll(endpoint: string, projectPath: string, isOpen: boolean, inte
   return { data, loading, refetch: doFetch };
 }
 
+/* ---- Panel width constants ---- */
+const MIN_WIDTH = 380;
+const DEFAULT_WIDTH = 520;
+const MAX_WIDTH = 900;
+
+/* ---- Tab type ---- */
+type DrawerTab = "tasks" | "monitor" | "costs" | "code" | "sessions" | "expertise" | "swarm";
+
 /* ---- Main Component ---- */
 
 export function DetailDrawer({
@@ -134,34 +151,66 @@ export function DetailDrawer({
 }: DetailDrawerProps) {
   const drawerRef = useRef<HTMLDivElement>(null);
 
-  // Tab state — declared early so polling can be tab-conditional
-  const [activeDrawerTab, setActiveDrawerTab] = useState<"tasks" | "observe" | "expertise" | "docs" | "swarm">("tasks");
+  // Tab state
+  const [activeDrawerTab, setActiveDrawerTab] = useState<DrawerTab>("tasks");
 
-  // REST API polling — only poll endpoints relevant to the active tab
-  const isObserveTab = isOpen && activeDrawerTab === "observe";
-  const isDocsTab = isOpen && activeDrawerTab === "docs";
+  // Resizable width
+  const [panelWidth, setPanelWidth] = useState(DEFAULT_WIDTH);
+  const isResizing = useRef(false);
+  const startX = useRef(0);
+  const startWidth = useRef(DEFAULT_WIDTH);
+
+  const handleResizeStart = useCallback((e: React.MouseEvent) => {
+    isResizing.current = true;
+    startX.current = e.clientX;
+    startWidth.current = panelWidth;
+    e.preventDefault();
+  }, [panelWidth]);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizing.current) return;
+      const delta = startX.current - e.clientX;
+      const newWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startWidth.current + delta));
+      setPanelWidth(newWidth);
+    };
+    const handleMouseUp = () => { isResizing.current = false; };
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, []);
+
+  const toggleWideMode = useCallback(() => {
+    setPanelWidth((w) => w >= MAX_WIDTH ? DEFAULT_WIDTH : MAX_WIDTH);
+  }, []);
+
+  // Tab-conditional polling flags
+  const isMonitorTab = isOpen && activeDrawerTab === "monitor";
+  const isCodeTab = isOpen && activeDrawerTab === "code";
+  const isSessionsTab = isOpen && activeDrawerTab === "sessions";
 
   // Budget is shared (status strip uses it) — poll always when open
   const { data: budgetData } = useApiPoll("budget", projectPath, isOpen, 15000);
-  // Observe tab polls
-  const { data: costsData } = useApiPoll("costs", projectPath, isObserveTab, 15000);
-  const { data: costsByModel } = useApiPoll("costs/by-model", projectPath, isObserveTab, 15000);
-  const { data: insightsData } = useApiPoll("insights", projectPath, isObserveTab, 15000);
-  const { data: timelineData } = useApiPoll("timeline", projectPath, isObserveTab, 10000);
-  const { data: processesData } = useApiPoll("processes", projectPath, isObserveTab, 15000);
-  const { data: sessionStatsApi } = useApiPoll("session-stats", projectPath, isObserveTab, 15000);
-  const { data: agentsData } = useApiPoll("agents", projectPath, isObserveTab, 15000);
-  const { data: auditTimelineData } = useApiPoll("audit-timeline", projectPath, isObserveTab, 15000);
-  // LSP polls (observe tab)
-  const { data: lspStatusData } = useApiPoll("lsp/status", projectPath, isObserveTab, 10000);
-  const { data: lspDiagData } = useApiPoll("lsp/diagnostics", projectPath, isObserveTab, 10000);
-  const { data: lspHealthData } = useApiPoll("lsp/code-health", projectPath, isObserveTab, 10000);
-  const { data: lspStatsData } = useApiPoll("lsp/stats", projectPath, isObserveTab, 5000);
-  // Docs tab polls
-  const { data: checkpointsData } = useApiPoll("session-history", projectPath, isDocsTab, 15000);
-  const { data: sessionChainData } = useApiPoll("session/chain", projectPath, isDocsTab, 15000);
-  // Observe tab — reflections poll (moved from old memory tab)
-  const { data: reflectionsData } = useApiPoll("reflections", projectPath, isObserveTab, 20000);
+
+  // Monitor tab polls
+  const { data: insightsData } = useApiPoll("insights", projectPath, isMonitorTab, 15000);
+  const { data: sessionStatsApi } = useApiPoll("session-stats", projectPath, isMonitorTab, 15000);
+  const { data: agentsData } = useApiPoll("agents", projectPath, isMonitorTab, 15000);
+  const { data: auditTimelineData } = useApiPoll("audit-timeline", projectPath, isMonitorTab, 15000);
+
+  // Code tab polls
+  const { data: checkpointsData } = useApiPoll("session-history", projectPath, isCodeTab, 15000);
+  const { data: lspStatusData } = useApiPoll("lsp/status", projectPath, isCodeTab, 10000);
+  const { data: lspDiagData } = useApiPoll("lsp/diagnostics", projectPath, isCodeTab, 10000);
+  const { data: lspHealthData } = useApiPoll("lsp/code-health", projectPath, isCodeTab, 10000);
+  const { data: lspStatsData } = useApiPoll("lsp/stats", projectPath, isCodeTab, 5000);
+
+  // Sessions tab polls
+  const { data: sessionChainData } = useApiPoll("session/chain", projectPath, isSessionsTab, 15000);
+  const { data: reflectionsData } = useApiPoll("reflections", projectPath, isSessionsTab, 20000);
 
   // Worktree diff (only when worktree exists)
   const [worktreeDiffData, setWorktreeDiffData] = useState<{ diff: string; status?: { files_changed?: number } } | null>(null);
@@ -184,28 +233,35 @@ export function DetailDrawer({
   // Graph modal (full-size task dependency graph)
   const [graphModalOpen, setGraphModalOpen] = useState(false);
 
-  // Tabbed drawer: tasks | observe | expertise | docs | swarm
-  const sectionToTab: Record<string, "tasks" | "observe" | "expertise" | "docs" | "swarm"> = {
+  // Section-to-tab mapping for deep-linking via activeSection prop
+  const sectionToTab: Record<string, DrawerTab> = {
     tasks: "tasks",
-    files: "observe",
-    costs: "observe",
-    agents: "observe",
-    timeline: "observe",
-    errors: "observe",
-    audit: "observe",
-    profile: "observe",
-    processes: "observe",
-    insights: "observe",
-    reflections: "observe",
+    "task-groups": "tasks",
+    spec: "tasks",
+    timeline: "monitor",
+    errors: "monitor",
+    agents: "monitor",
+    processes: "monitor",
+    audit: "monitor",
+    profile: "monitor",
+    insights: "monitor",
+    costs: "costs",
+    budget: "costs",
+    "run-history": "costs",
+    files: "code",
+    checkpoints: "code",
+    snapshots: "code",
+    "code-intel": "code",
+    adrs: "code",
+    sessions: "sessions",
+    "session-chain": "sessions",
+    reflections: "sessions",
     "expertise-records": "expertise",
     "expertise-causal": "expertise",
     "expertise-lessons": "expertise",
     "expertise-analytics": "expertise",
-    adrs: "docs",
-    checkpoints: "docs",
     mail: "swarm",
     merges: "swarm",
-    "code-intel": "observe",
   };
   useEffect(() => {
     if (activeSection && sectionToTab[activeSection]) {
@@ -335,7 +391,6 @@ export function DetailDrawer({
   // Merge file touches from WS sessionStats + REST API + audit-timeline + worktree diff
   const fileTouches = useMemo(() => {
     const touches: Record<string, number> = { ...(sessionStats?.file_touches ?? sessionStatsApi?.file_touches ?? {}) };
-    // From audit-timeline: extract file paths from tool_input, input, or tool_input_preview
     const entries = (auditTimelineData?.entries ?? []) as ApiData[];
     for (const entry of entries) {
       let fp = "";
@@ -351,7 +406,6 @@ export function DetailDrawer({
         touches[fp] = (touches[fp] ?? 0) + 1;
       }
     }
-    // From worktree diff: parse "diff --git a/path b/path"
     const diff = worktreeDiffData?.diff ?? "";
     if (diff) {
       const seen = new Set<string>();
@@ -374,7 +428,6 @@ export function DetailDrawer({
     const counts: Record<string, number> = {};
     for (const e of events) {
       if (e.type === "tool_start") {
-        // tool name is at e.data.tool (flat event from native engine)
         const t = (e.data?.tool as string) || "Unknown";
         counts[t] = (counts[t] ?? 0) + 1;
       }
@@ -392,22 +445,14 @@ export function DetailDrawer({
     [events]
   );
 
-  // Merge tool counts: WS sessionStats → REST session-stats API → live native events
+  // Merge tool counts: WS sessionStats -> REST session-stats API -> live native events
   const mergedToolCounts = useMemo(() => {
     if (sessionStats?.tool_counts && Object.keys(sessionStats.tool_counts).length > 0) return sessionStats.tool_counts;
     if (sessionStatsApi?.tool_counts && Object.keys(sessionStatsApi.tool_counts).length > 0) return sessionStatsApi.tool_counts;
     return nativeToolCounts;
   }, [sessionStats, sessionStatsApi, nativeToolCounts]);
 
-  // MCP servers from native engine events (emitted once at session start)
-  const mcpServers = useMemo(() => {
-    const ev = events.filter((e) => e.type === "mcp_servers");
-    if (ev.length === 0) return [];
-    const last = ev[ev.length - 1];
-    return (last.data?.servers as ApiData[]) || [];
-  }, [events]);
-
-  // LSP data transformations (API responses → LSPPanel prop shapes)
+  // LSP data transformations (API responses -> LSPPanel prop shapes)
   type LspDiag = { uri: string; line: number; character: number; end_line: number; end_character: number; severity: number; severity_label: string; message: string; source: string | null; code: string | number | null };
   type LspServer = { language_id: string; server_name: string; status: "stopped" | "starting" | "ready" | "degraded" | "crashed"; root_uri: string; pid: number | null; started_at: string; restart_count: number; open_files: number; diagnostic_count: number; worker_id: number | null };
   type LspHealth = { score: number; error_count: number; warning_count: number; info_count: number; hint_count: number; by_language: Record<string, { score: number; errors: number; warnings: number }> };
@@ -487,7 +532,7 @@ export function DetailDrawer({
     }
   }, [lspCodeHealth]);
 
-  // Fall back through: live WS → REST API → native event count → insights
+  // Fall back through: live WS -> REST API -> native event count -> insights
   const mergedToolCallCount: number =
     (sessionStats?.tool_call_count ?? 0) > 0 ? sessionStats!.tool_call_count :
     asNum(sessionStatsApi?.tool_call_count) > 0 ? asNum(sessionStatsApi?.tool_call_count) :
@@ -500,7 +545,6 @@ export function DetailDrawer({
     nativeErrorCount;
 
   // Insights: prefer REST API data, fall back to computed from sessionStats
-  // API returns [{name, count}] or [{path, edit_count}]; Object.entries gives [k,v] tuples
   const topTools = useMemo(() => {
     if (insightsData && insightsData.top_tools && Array.isArray(insightsData.top_tools) && insightsData.top_tools.length > 0) return insightsData.top_tools;
     if (!mergedToolCounts || Object.keys(mergedToolCounts).length === 0) return [];
@@ -578,6 +622,17 @@ export function DetailDrawer({
     return () => document.removeEventListener("keydown", handler);
   }, [isOpen, onClose]);
 
+  // Tab definitions
+  const tabs: { key: DrawerTab; label: string; icon: string }[] = [
+    { key: "tasks", label: "Tasks", icon: "\u2611" },
+    { key: "monitor", label: "Monitor", icon: "\u25C6" },
+    { key: "costs", label: "Costs", icon: "$" },
+    { key: "code", label: "Code", icon: "\u2726" },
+    { key: "sessions", label: "Sessions", icon: "\u25A3" },
+    { key: "expertise", label: "Expertise", icon: "\u2261" },
+    ...(isSwarmMode ? [{ key: "swarm" as DrawerTab, label: "Swarm", icon: "\u2302" }] : []),
+  ];
+
   return (
     <>
       {/* Overlay */}
@@ -588,7 +643,7 @@ export function DetailDrawer({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="fixed inset-0 bg-black/40 z-40"
+            className="fixed inset-0 bg-black/30 z-40"
             onClick={onClose}
           />
         )}
@@ -599,57 +654,64 @@ export function DetailDrawer({
         <button
           onClick={onToggle}
           className="fixed right-0 top-1/2 -translate-y-1/2 z-50 w-5 h-12 bg-[#1A1A1A] border border-r-0 border-[#333] flex items-center justify-center hover:bg-[#222] transition-colors"
-          title="Open detail drawer"
+          title="Open command panel"
         >
           <span className="text-[#555] text-xs">&lt;</span>
         </button>
       )}
 
-      {/* Drawer panel */}
+      {/* Panel */}
       <AnimatePresence>
         {isOpen && (
           <motion.div
             ref={drawerRef}
-            initial={{ x: 420 }}
+            initial={{ x: panelWidth }}
             animate={{ x: 0 }}
-            exit={{ x: 420 }}
+            exit={{ x: panelWidth }}
             transition={{ type: "spring", damping: 30, stiffness: 300 }}
-            className="fixed right-0 top-[4.5rem] bottom-16 w-[420px] max-w-[90vw] z-50 bg-[#0C0C0C] border-l border-[#333] flex flex-col shadow-2xl"
+            className="fixed right-0 top-[4.5rem] bottom-16 max-w-[90vw] z-50 bg-[#0C0C0C] border-l border-[#333] flex flex-col shadow-2xl"
+            style={{ width: panelWidth }}
           >
+            {/* Resize handle */}
+            <div
+              className="absolute left-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-[var(--color-accent)]/30 active:bg-[var(--color-accent)]/50 transition-colors z-10"
+              onMouseDown={handleResizeStart}
+              title="Drag to resize"
+            />
+
             {/* Header */}
-            <div className="flex items-center gap-2 px-4 py-3 border-b border-[#222] shrink-0 bg-[#0C0C0C]">
-              <span className="text-[var(--color-accent)] text-xs">■</span>
-              <h2 className="text-sm font-mono font-bold text-[#E0E0E0] tracking-wider uppercase flex-1">Details</h2>
+            <div className="flex items-center gap-2 px-4 py-2.5 border-b border-[#222] shrink-0 bg-[#0C0C0C]">
+              <span className="text-[var(--color-accent)] text-xs">{"\u25A0"}</span>
+              <h2 className="text-sm font-mono font-bold text-[#E0E0E0] tracking-wider uppercase flex-1">Command Panel</h2>
               {worktreeInfo && (
                 <span className="text-[10px] font-mono text-[#555] truncate max-w-[120px]">
                   {worktreeInfo.branch}
                 </span>
               )}
               <button
+                onClick={toggleWideMode}
+                className="w-6 h-6 flex items-center justify-center hover:bg-[#1A1A1A] transition-colors text-[#555] hover:text-[#E0E0E0]"
+                title={panelWidth >= MAX_WIDTH ? "Collapse panel" : "Expand panel"}
+              >
+                {panelWidth >= MAX_WIDTH ? "\u25B6\u25C0" : "\u25C0\u25B6"}
+              </button>
+              <button
                 onClick={onClose}
                 className="w-6 h-6 flex items-center justify-center hover:bg-[#1A1A1A] transition-colors text-[#555] hover:text-[#E0E0E0]"
-                title="Close drawer"
+                title="Close panel"
               >
                 {"\u2717"}
               </button>
             </div>
 
             {/* Tab bar */}
-            <div className="flex gap-0.5 px-3 py-2 border-b border-[#222] bg-[#0C0C0C] shrink-0 overflow-x-auto">
-              {(
-                [
-                  { key: "tasks", label: "Tasks", icon: "\u2611" },
-                  { key: "observe", label: "Observe", icon: "\u25C6" },
-                  { key: "expertise", label: "Expertise", icon: "\u2261" },
-                  { key: "docs", label: "Docs", icon: "\u2234" },
-                  ...(isSwarmMode ? [{ key: "swarm", label: "Swarm", icon: "\u2302" }] : []),
-                ] as const
-              ).map(({ key, label, icon }) => (
+            <div className="flex gap-0.5 px-2 py-1.5 border-b border-[#222] bg-[#0C0C0C] shrink-0 overflow-x-auto">
+              {tabs.map(({ key, label, icon }) => (
                 <button
                   key={key}
                   type="button"
-                  onClick={() => setActiveDrawerTab(key as typeof activeDrawerTab)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-mono font-bold uppercase tracking-wider rounded transition-colors shrink-0 ${
+                  onClick={() => setActiveDrawerTab(key)}
+                  className={`flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-mono font-bold uppercase tracking-wider rounded transition-colors shrink-0 ${
                     activeDrawerTab === key
                       ? "bg-[var(--color-accent)]/20 text-[var(--color-accent)] border border-[var(--color-accent)]/50"
                       : "text-[#555] hover:text-[#888] hover:bg-[#1A1A1A] border border-transparent"
@@ -663,8 +725,10 @@ export function DetailDrawer({
 
             {/* Scrollable sections (filtered by active tab) */}
             <div className="flex-1 overflow-y-auto tui-scrollbar">
-              {/* ── Tasks tab ── */}
+
+              {/* ═══════════════════ Tasks tab ═══════════════════ */}
               {activeDrawerTab === "tasks" && (
+              <>
               <DrawerSection
                 title="Tasks"
                 icon={<span className="text-xs font-mono">{"\u2611"}</span>}
@@ -699,108 +763,84 @@ export function DetailDrawer({
                   </div>
                 )}
               </DrawerSection>
+
+              <DrawerSection
+                title="Task Groups"
+                icon={<span className="text-xs font-mono">{"\u2630"}</span>}
+                forceOpen={activeSection === "task-groups" ? true : undefined}
+              >
+                <div className="min-h-[120px]">
+                  <TaskGroupPanel projectDir={projectPath} />
+                </div>
+              </DrawerSection>
+
+              <DrawerSection
+                title="Specifications"
+                icon={<span className="text-xs font-mono">{"\u2234"}</span>}
+                forceOpen={activeSection === "spec" ? true : undefined}
+              >
+                <div className="min-h-[120px]">
+                  <SpecPanel projectDir={projectPath} />
+                </div>
+              </DrawerSection>
+              </>
               )}
 
-              {/* ── Observe tab ── */}
-              {activeDrawerTab === "observe" && (
+              {/* ═══════════════════ Monitor tab ═══════════════════ */}
+              {activeDrawerTab === "monitor" && (
               <>
               <DrawerSection
-                title="Files Changed"
-                icon={<span className="text-xs font-mono">{"\u25A0"}</span>}
-                count={fileTouches.length || (worktreeInfo?.files_changed ?? 0)}
-                forceOpen={activeSection === "files" ? true : undefined}
+                title="Timeline"
+                icon={<span className="text-xs font-mono">{"\u25C6"}</span>}
+                defaultOpen={true}
+                forceOpen={activeSection === "timeline" ? true : undefined}
               >
-                {fileTouches.length > 0 ? (
-                  <div className="space-y-1">
-                    {fileTouches.map(([file, count]) => (
-                      <div key={file as string} className="flex items-center gap-2 py-0.5">
-                        <span className="text-[10px] font-mono text-[var(--color-accent)] w-6 text-right shrink-0">{count as number}</span>
-                        <span className="text-xs font-mono text-[#888] truncate">{file as string}</span>
-                      </div>
-                    ))}
-                  </div>
-                ) : worktreeInfo ? (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between text-xs font-mono">
-                      <span className="text-[#555]">Files changed</span>
-                      <span className="text-[#E0E0E0]">{worktreeInfo.files_changed ?? 0}</span>
-                    </div>
-                    <div className="flex items-center justify-between text-xs font-mono">
-                      <span className="text-[#555]">Insertions</span>
-                      <span className="text-[var(--color-success)]">+{worktreeInfo.insertions ?? 0}</span>
-                    </div>
-                    <div className="flex items-center justify-between text-xs font-mono">
-                      <span className="text-[#555]">Deletions</span>
-                      <span className="text-[var(--color-error)]">-{worktreeInfo.deletions ?? 0}</span>
-                    </div>
-                    <p className="text-[10px] font-mono text-[#555]">Use Inspect diff for full file list</p>
-                  </div>
+                <div className="min-h-[200px]">
+                  <TimelinePanel projectDir={projectPath} />
+                </div>
+              </DrawerSection>
+
+              <DrawerSection
+                title="Errors"
+                icon={<span className="text-xs font-mono text-[var(--color-error)]">!</span>}
+                count={errorEvents.length}
+                hasNotification={errorEvents.length > 0}
+                forceOpen={activeSection === "errors" ? true : undefined}
+              >
+                {errorEvents.length === 0 ? (
+                  <p className="text-xs font-mono text-[#555]">No errors</p>
                 ) : (
-                  <p className="text-xs font-mono text-[#555]">No file changes recorded</p>
+                  <div className="space-y-2 max-h-64 overflow-y-auto tui-scrollbar">
+                    {errorEvents.map((evt, i) => {
+                      const d = evt.data || {};
+                      const severity = (d.severity as string) || (evt.type === "blocked" ? "warning" : "error");
+                      const msg = (d.message as string) || (d.error as string) || (d.reason as string) || (d.feedback as string) || JSON.stringify(d);
+                      return (
+                        <div key={`${evt.timestamp}-${i}`} className="p-2 bg-[#121212] border border-[#222] border-l-2" style={{ borderLeftColor: SEVERITY_COLOR[severity] || SEVERITY_COLOR.error }}>
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-[10px] font-mono font-medium" style={{ color: SEVERITY_COLOR[severity] || SEVERITY_COLOR.error }}>
+                              {severity.toUpperCase()}
+                            </span>
+                            <span className="text-[10px] font-mono text-[#555]">{formatTime(evt.timestamp)}</span>
+                          </div>
+                          <p className="text-xs font-mono text-[#888] break-words">{typeof msg === "string" ? msg.slice(0, 300) : String(msg).slice(0, 300)}</p>
+                        </div>
+                      );
+                    })}
+                  </div>
                 )}
               </DrawerSection>
 
               <DrawerSection
-                title="Costs"
-                icon={<span className="text-xs font-mono">$</span>}
-                forceOpen={activeSection === "costs" ? true : undefined}
+                title="Processes"
+                icon={<span className="text-xs font-mono">{"\u2699"}</span>}
+                forceOpen={activeSection === "processes" ? true : undefined}
               >
-                {budgetData || costsData ? (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-mono text-[#555]">Total Cost</span>
-                      <span className="text-sm font-mono font-bold text-[#E0E0E0]">
-                        ${Number(budgetData?.estimated_cost_usd ?? costsData?.total_cost ?? 0).toFixed(4)}
-                      </span>
-                    </div>
-                    {budgetData && asNum(budgetData.budget_limit_usd) > 0 && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-mono text-[#555]">Budget Limit</span>
-                        <span className="text-xs font-mono text-[#888]">
-                          ${asNum(budgetData.budget_limit_usd).toFixed(2)}
-                        </span>
-                      </div>
-                    )}
-                    {budgetData && asNum(budgetData.total_input_tokens) > 0 && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-mono text-[#555]">Tokens (in/out)</span>
-                        <span className="text-xs font-mono text-[#888]">
-                          {asNum(budgetData.total_input_tokens).toLocaleString()} / {asNum(budgetData.total_output_tokens).toLocaleString()}
-                        </span>
-                      </div>
-                    )}
-                    {budgetData && asNum(budgetData.session_count) > 0 && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-mono text-[#555]">Sessions</span>
-                        <span className="text-xs font-mono text-[#888]">{asNum(budgetData.session_count)}</span>
-                      </div>
-                    )}
-                    {budgetData && asNum(budgetData.elapsed_hours) > 0 && (
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-mono text-[#555]">Runtime</span>
-                        <span className="text-xs font-mono text-[#888]">{asNum(budgetData.elapsed_hours).toFixed(1)}h</span>
-                      </div>
-                    )}
-                    {!!(costsByModel?.by_model) && typeof costsByModel.by_model === "object" && Object.keys(costsByModel.by_model as object).length > 0 && (
-                      <div className="mt-2 pt-2 border-t border-[#222]">
-                        <span className="text-[10px] font-mono text-[#555] uppercase tracking-wider">By Model</span>
-                        <div className="mt-1 space-y-1">
-                          {Object.entries(costsByModel.by_model as Record<string, unknown>).map(([model, cost]) => (
-                            <div key={model} className="flex items-center justify-between">
-                              <span className="text-[10px] font-mono text-[#888] truncate flex-1">{model}</span>
-                              <span className="text-[10px] font-mono text-[var(--color-accent)] ml-2">${asNum(cost).toFixed(4)}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <p className="text-xs font-mono text-[#555]">No cost data yet</p>
-                )}
+                <div className="min-h-[100px]">
+                  <ProcessPanel projectDir={projectPath} />
+                </div>
               </DrawerSection>
 
-              {/* 4. Agents */}
               <DrawerSection
                 title="Agents"
                 icon={<span className="text-xs font-mono">{"\u2302"}</span>}
@@ -869,65 +909,6 @@ export function DetailDrawer({
                 )}
               </DrawerSection>
 
-              {/* 5. Timeline */}
-              <DrawerSection
-                title="Timeline"
-                icon={<span className="text-xs font-mono">{"\u25C6"}</span>}
-                count={asArr(timelineData?.events).length}
-                forceOpen={activeSection === "timeline" ? true : undefined}
-              >
-                {asArr(timelineData?.events).length > 0 ? (
-                  <div className="space-y-1.5 max-h-72 overflow-y-auto tui-scrollbar">
-                    {asArr(timelineData?.events).slice(-40).map((evt: ApiData, i: number) => (
-                      <div key={`tl-${i}`} className="flex items-start gap-2 py-1">
-                        <span className="text-[10px] font-mono text-[#555] shrink-0 w-16 tabular-nums">
-                          {formatTime(asStr(evt.timestamp))}
-                        </span>
-                        <span className="text-[10px] font-mono text-[var(--color-accent)] shrink-0 w-20 truncate">{asStr(evt.type || evt.event_type)}</span>
-                        <span className="text-xs font-mono text-[#888] truncate flex-1">
-                          {asStr(evt.summary || evt.message || evt.phase || evt.agent_name) || JSON.stringify(evt.data ?? evt).slice(0, 80)}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs font-mono text-[#555]">No timeline events</p>
-                )}
-              </DrawerSection>
-
-              {/* 6. Errors */}
-              <DrawerSection
-                title="Errors"
-                icon={<span className="text-xs font-mono text-[var(--color-error)]">!</span>}
-                count={errorEvents.length}
-                hasNotification={errorEvents.length > 0}
-                forceOpen={activeSection === "errors" ? true : undefined}
-              >
-                {errorEvents.length === 0 ? (
-                  <p className="text-xs font-mono text-[#555]">No errors</p>
-                ) : (
-                  <div className="space-y-2 max-h-64 overflow-y-auto tui-scrollbar">
-                    {errorEvents.map((evt, i) => {
-                      const d = evt.data || {};
-                      const severity = (d.severity as string) || (evt.type === "blocked" ? "warning" : "error");
-                      const msg = (d.message as string) || (d.error as string) || (d.reason as string) || (d.feedback as string) || JSON.stringify(d);
-                      return (
-                        <div key={`${evt.timestamp}-${i}`} className="p-2 bg-[#121212] border border-[#222] border-l-2" style={{ borderLeftColor: SEVERITY_COLOR[severity] || SEVERITY_COLOR.error }}>
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="text-[10px] font-mono font-medium" style={{ color: SEVERITY_COLOR[severity] || SEVERITY_COLOR.error }}>
-                              {severity.toUpperCase()}
-                            </span>
-                            <span className="text-[10px] font-mono text-[#555]">{formatTime(evt.timestamp)}</span>
-                          </div>
-                          <p className="text-xs font-mono text-[#888] break-words">{typeof msg === "string" ? msg.slice(0, 300) : String(msg).slice(0, 300)}</p>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </DrawerSection>
-
-              {/* Observe tab continues: Audit, Profile, Processes — close before Memory */}
               <DrawerSection
                 title="Audit"
                 icon={<span className="text-xs font-mono">{"\u2630"}</span>}
@@ -1006,60 +987,6 @@ export function DetailDrawer({
               </DrawerSection>
 
               <DrawerSection
-                title="Processes"
-                icon={<span className="text-xs font-mono">{"\u2699"}</span>}
-                count={asArr(processesData?.processes).length}
-                forceOpen={activeSection === "processes" ? true : undefined}
-              >
-                {asArr(processesData?.processes).length > 0 ? (
-                  <div className="space-y-2 max-h-64 overflow-y-auto tui-scrollbar">
-                    {asArr(processesData?.processes).map((proc: ApiData, i: number) => (
-                      <div key={i} className="p-2 bg-[#121212] border border-[#222]">
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] font-mono text-[var(--color-success)] w-2 h-2 rounded-full bg-current shrink-0" />
-                          <span className="text-xs font-mono text-[#E0E0E0]">{asStr(proc.type) || asStr(proc.command) || "Process"}</span>
-                          {proc.port != null && <span className="text-[10px] font-mono text-[#555]">:{String(proc.port)}</span>}
-                          {proc.pid != null && <span className="text-[10px] font-mono text-[#555] ml-auto">PID {String(proc.pid)}</span>}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : mcpServers.length > 0 ? (
-                  <div className="space-y-2">
-                    <p className="text-[10px] font-mono text-[#555] uppercase tracking-wider mb-1">MCP Servers</p>
-                    {mcpServers.map((s: ApiData, i: number) => (
-                      <div key={i} className="p-2 bg-[#121212] border border-[#222]">
-                        <span className="text-xs font-mono text-[#E0E0E0]">{asStr(s.name) || asStr(s.id) || `Server ${i + 1}`}</span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs font-mono text-[#555]">No tracked processes</p>
-                )}
-              </DrawerSection>
-
-              <DrawerSection
-                title="Code Intel"
-                icon={<span className="text-xs font-mono">{"\u2726"}</span>}
-                count={(() => { const n = Object.values(lspDiagnostics).reduce((sum, arr) => sum + arr.length, 0); return n > 0 ? n : undefined; })()}
-                forceOpen={activeSection === "code-intel" ? true : undefined}
-              >
-                <div className="min-h-[280px] -mx-2 -mb-2">
-                  <LSPPanel
-                    diagnostics={lspDiagnostics}
-                    serverStatus={lspServerStatus}
-                    codeHealth={lspCodeHealth}
-                    codeHealthTrend={lspCodeHealthTrend}
-                    crossWorkerAlerts={[]}
-                    projectDir={projectPath || ""}
-                    isTeamMode={isSwarmMode}
-                    workerCount={0}
-                    stats={lspStatsData as any ?? undefined}
-                  />
-                </div>
-              </DrawerSection>
-
-              <DrawerSection
                 title="Insights"
                 icon={<span className="text-xs font-mono">{"\u2605"}</span>}
                 forceOpen={activeSection === "insights" ? true : undefined}
@@ -1105,6 +1032,259 @@ export function DetailDrawer({
                   <p className="text-xs font-mono text-[#555]">No insights yet</p>
                 )}
               </DrawerSection>
+              </>
+              )}
+
+              {/* ═══════════════════ Costs tab ═══════════════════ */}
+              {activeDrawerTab === "costs" && (
+              <>
+              <DrawerSection
+                title="Budget"
+                icon={<span className="text-xs font-mono">$</span>}
+                defaultOpen={true}
+                forceOpen={activeSection === "budget" ? true : undefined}
+              >
+                {budgetData ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-mono text-[#555]">Total Cost</span>
+                      <span className="text-sm font-mono font-bold text-[#E0E0E0]">
+                        ${Number(budgetData?.estimated_cost_usd ?? 0).toFixed(4)}
+                      </span>
+                    </div>
+                    {asNum(budgetData.budget_limit_usd) > 0 && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-mono text-[#555]">Budget Limit</span>
+                        <span className="text-xs font-mono text-[#888]">
+                          ${asNum(budgetData.budget_limit_usd).toFixed(2)}
+                        </span>
+                      </div>
+                    )}
+                    {asNum(budgetData.total_input_tokens) > 0 && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-mono text-[#555]">Tokens (in/out)</span>
+                        <span className="text-xs font-mono text-[#888]">
+                          {asNum(budgetData.total_input_tokens).toLocaleString()} / {asNum(budgetData.total_output_tokens).toLocaleString()}
+                        </span>
+                      </div>
+                    )}
+                    {asNum(budgetData.session_count) > 0 && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-mono text-[#555]">Sessions</span>
+                        <span className="text-xs font-mono text-[#888]">{asNum(budgetData.session_count)}</span>
+                      </div>
+                    )}
+                    {asNum(budgetData.elapsed_hours) > 0 && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-mono text-[#555]">Runtime</span>
+                        <span className="text-xs font-mono text-[#888]">{asNum(budgetData.elapsed_hours).toFixed(1)}h</span>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-xs font-mono text-[#555]">No budget data yet</p>
+                )}
+              </DrawerSection>
+
+              <DrawerSection
+                title="Cost Breakdown"
+                icon={<span className="text-xs font-mono">{"\u2261"}</span>}
+                forceOpen={activeSection === "costs" ? true : undefined}
+              >
+                <div className="min-h-[200px]">
+                  <CostPanel projectDir={projectPath} />
+                </div>
+              </DrawerSection>
+
+              <DrawerSection
+                title="Run History"
+                icon={<span className="text-xs font-mono">{"\u25A3"}</span>}
+                forceOpen={activeSection === "run-history" ? true : undefined}
+              >
+                <div className="min-h-[150px]">
+                  <RunHistoryPanel projectDir={projectPath} />
+                </div>
+              </DrawerSection>
+              </>
+              )}
+
+              {/* ═══════════════════ Code tab ═══════════════════ */}
+              {activeDrawerTab === "code" && (
+              <>
+              <DrawerSection
+                title="Files Changed"
+                icon={<span className="text-xs font-mono">{"\u25A0"}</span>}
+                count={fileTouches.length || (worktreeInfo?.files_changed ?? 0)}
+                defaultOpen={true}
+                forceOpen={activeSection === "files" ? true : undefined}
+              >
+                {fileTouches.length > 0 ? (
+                  <div className="space-y-1">
+                    {fileTouches.map(([file, count]) => (
+                      <div key={file as string} className="flex items-center gap-2 py-0.5">
+                        <span className="text-[10px] font-mono text-[var(--color-accent)] w-6 text-right shrink-0">{count as number}</span>
+                        <span className="text-xs font-mono text-[#888] truncate">{file as string}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : worktreeInfo ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-xs font-mono">
+                      <span className="text-[#555]">Files changed</span>
+                      <span className="text-[#E0E0E0]">{worktreeInfo.files_changed ?? 0}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs font-mono">
+                      <span className="text-[#555]">Insertions</span>
+                      <span className="text-[var(--color-success)]">+{worktreeInfo.insertions ?? 0}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs font-mono">
+                      <span className="text-[#555]">Deletions</span>
+                      <span className="text-[var(--color-error)]">-{worktreeInfo.deletions ?? 0}</span>
+                    </div>
+                    <p className="text-[10px] font-mono text-[#555]">Use Inspect diff for full file list</p>
+                  </div>
+                ) : (
+                  <p className="text-xs font-mono text-[#555]">No file changes recorded</p>
+                )}
+              </DrawerSection>
+
+              <DrawerSection
+                title="Code Intel"
+                icon={<span className="text-xs font-mono">{"\u2726"}</span>}
+                count={(() => { const n = Object.values(lspDiagnostics).reduce((sum, arr) => sum + arr.length, 0); return n > 0 ? n : undefined; })()}
+                forceOpen={activeSection === "code-intel" ? true : undefined}
+              >
+                <div className="min-h-[280px] -mx-2 -mb-2">
+                  <LSPPanel
+                    diagnostics={lspDiagnostics}
+                    serverStatus={lspServerStatus}
+                    codeHealth={lspCodeHealth}
+                    codeHealthTrend={lspCodeHealthTrend}
+                    crossWorkerAlerts={[]}
+                    projectDir={projectPath || ""}
+                    isTeamMode={isSwarmMode}
+                    workerCount={0}
+                    stats={lspStatsData as any ?? undefined}
+                  />
+                </div>
+              </DrawerSection>
+
+              <DrawerSection
+                title="Snapshots"
+                icon={<span className="text-xs font-mono">{"\u25A3"}</span>}
+                forceOpen={activeSection === "snapshots" ? true : undefined}
+              >
+                <div className="min-h-[150px]">
+                  <SnapshotPanel projectDir={projectPath} status={undefined} />
+                </div>
+              </DrawerSection>
+
+              <DrawerSection
+                title="Checkpoints"
+                icon={<span className="text-xs font-mono">{"\u2691"}</span>}
+                count={asArr(checkpointsData?.timeline).length || undefined}
+                forceOpen={activeSection === "checkpoints" ? true : undefined}
+              >
+                {asArr(checkpointsData?.timeline).length > 0 ? (
+                  <div className="space-y-1.5 max-h-80 overflow-y-auto tui-scrollbar">
+                    {asArr(checkpointsData?.timeline).map((commit: ApiData, i: number) => {
+                      const sha = (commit.sha as string) || "";
+                      const shortSha = sha.slice(0, 8);
+                      const message = (commit.message as string) || "commit";
+                      const ts = (commit.timestamp as string) || "";
+                      const filesChanged = (commit.files_changed as number) || 0;
+                      const insertions = (commit.insertions as number) || 0;
+                      const deletions = (commit.deletions as number) || 0;
+                      const isResetting = resettingTo === sha;
+                      return (
+                        <div key={sha || i} className="p-2 bg-[#121212] border border-[#222] border-l-2 border-l-[var(--color-accent)]/40">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-[10px] font-mono text-[var(--color-accent)] shrink-0 bg-[var(--color-accent)]/10 px-1.5 py-0.5">
+                              {shortSha}
+                            </span>
+                            <span className="text-xs font-mono text-[#E0E0E0] truncate flex-1">{message}</span>
+                            {i > 0 && (
+                              <button
+                                onClick={() => handleGitReset(sha)}
+                                disabled={!!resettingTo}
+                                className="text-[10px] font-mono px-2 py-0.5 border border-[var(--color-warning)]/30 text-[var(--color-warning)] hover:bg-[var(--color-warning)]/10 transition-colors disabled:opacity-40 shrink-0"
+                              >
+                                {isResetting ? "..." : "Revert"}
+                              </button>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-3 text-[10px] font-mono text-[#555]">
+                            {ts && <span>{formatTime(ts)}</span>}
+                            {filesChanged > 0 && <span>{filesChanged} file{filesChanged !== 1 ? "s" : ""}</span>}
+                            {insertions > 0 && <span className="text-[var(--color-success)]">+{insertions}</span>}
+                            {deletions > 0 && <span className="text-[var(--color-error)]">{"\u2212"}{deletions}</span>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-xs font-mono text-[#555]">
+                    No commits yet — checkpoints appear here as the agent makes git commits
+                  </p>
+                )}
+              </DrawerSection>
+
+              <DrawerSection
+                title="ADRs"
+                icon={<span className="text-xs font-mono">{"\u2234"}</span>}
+                count={adrData?.adrs?.length}
+                onExpand={fetchADRs}
+                forceOpen={activeSection === "adrs" ? true : undefined}
+              >
+                {adrData === null ? (
+                  <p className="text-xs font-mono text-[#555]">Expand to load ADRs...</p>
+                ) : !adrData.adrs || adrData.adrs.length === 0 ? (
+                  <p className="text-xs font-mono text-[#555]">No architecture decision records</p>
+                ) : (
+                  <div className="space-y-1.5 max-h-64 overflow-y-auto tui-scrollbar">
+                    {adrData.adrs.map((adr) => (
+                      <div key={adr.id} className="flex items-center gap-2 p-2 bg-[#121212] border border-[#222] border-l-2 border-l-[var(--color-accent)]">
+                        <span className="text-[10px] font-mono text-[#555] shrink-0">{adr.id}</span>
+                        <span className="text-xs font-mono text-[#E0E0E0] flex-1 truncate">{adr.title}</span>
+                        <span className={`text-[10px] font-mono shrink-0 ${
+                          adr.status === "accepted" ? "text-[var(--color-success)]" :
+                          adr.status === "deprecated" ? "text-[var(--color-error)]" :
+                          "text-[#555]"
+                        }`}>
+                          {adr.status}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </DrawerSection>
+              </>
+              )}
+
+              {/* ═══════════════════ Sessions tab ═══════════════════ */}
+              {activeDrawerTab === "sessions" && (
+              <>
+              <DrawerSection
+                title="Session Browser"
+                icon={<span className="text-xs font-mono">{"\u25A3"}</span>}
+                defaultOpen={true}
+                forceOpen={activeSection === "sessions" ? true : undefined}
+              >
+                <div className="min-h-[200px]">
+                  <SessionBrowserPanel projectDir={projectPath} />
+                </div>
+              </DrawerSection>
+
+              <DrawerSection
+                title="Session Chain"
+                icon={<span className="text-xs font-mono">{"\u2192"}</span>}
+                forceOpen={activeSection === "session-chain" ? true : undefined}
+              >
+                <div className="min-h-[150px]">
+                  <SessionChainPanel projectDir={projectPath} />
+                </div>
+              </DrawerSection>
 
               <DrawerSection
                 title="Reflections"
@@ -1134,7 +1314,7 @@ export function DetailDrawer({
               </>
               )}
 
-              {/* ── Expertise tab ── */}
+              {/* ═══════════════════ Expertise tab ═══════════════════ */}
               {activeDrawerTab === "expertise" && (
               <>
               <DrawerSection
@@ -1349,7 +1529,6 @@ export function DetailDrawer({
                     const typeEntries = Object.entries(byType);
                     return (
                   <div className="space-y-3">
-                    {/* Summary row */}
                     <div className="flex gap-3">
                       <div className="flex items-center justify-between flex-1">
                         <span className="text-xs font-mono text-[#555]">Total Records</span>
@@ -1364,7 +1543,6 @@ export function DetailDrawer({
                         <span className="text-sm font-mono font-bold text-[#E0E0E0]">{domainHealth.length}</span>
                       </div>
                     </div>
-                    {/* By type breakdown */}
                     {typeEntries.length > 0 && (
                       <div>
                         <span className="text-[10px] font-mono text-[#555] uppercase tracking-wider block mb-1">By Type</span>
@@ -1378,7 +1556,6 @@ export function DetailDrawer({
                         </div>
                       </div>
                     )}
-                    {/* Domain health */}
                     {domainHealth.length > 0 && (
                       <div className="pt-2 border-t border-[#222]">
                         <span className="text-[10px] font-mono text-[#555] uppercase tracking-wider block mb-1">Domain Health</span>
@@ -1398,7 +1575,6 @@ export function DetailDrawer({
                         </div>
                       </div>
                     )}
-                    {/* Top records */}
                     {topRecords.length > 0 && (
                       <div className="pt-2 border-t border-[#222]">
                         <span className="text-[10px] font-mono text-[#555] uppercase tracking-wider block mb-1">Top by Confidence</span>
@@ -1441,93 +1617,7 @@ export function DetailDrawer({
               </>
               )}
 
-              {/* ── Docs tab ── */}
-              {activeDrawerTab === "docs" && (
-              <>
-              <DrawerSection
-                title="ADRs"
-                icon={<span className="text-xs font-mono">{"\u2234"}</span>}
-                count={adrData?.adrs?.length}
-                onExpand={fetchADRs}
-                forceOpen={activeSection === "adrs" ? true : undefined}
-              >
-                {adrData === null ? (
-                  <p className="text-xs font-mono text-[#555]">Expand to load ADRs...</p>
-                ) : !adrData.adrs || adrData.adrs.length === 0 ? (
-                  <p className="text-xs font-mono text-[#555]">No architecture decision records</p>
-                ) : (
-                  <div className="space-y-1.5 max-h-64 overflow-y-auto tui-scrollbar">
-                    {adrData.adrs.map((adr) => (
-                      <div key={adr.id} className="flex items-center gap-2 p-2 bg-[#121212] border border-[#222] border-l-2 border-l-[var(--color-accent)]">
-                        <span className="text-[10px] font-mono text-[#555] shrink-0">{adr.id}</span>
-                        <span className="text-xs font-mono text-[#E0E0E0] flex-1 truncate">{adr.title}</span>
-                        <span className={`text-[10px] font-mono shrink-0 ${
-                          adr.status === "accepted" ? "text-[var(--color-success)]" :
-                          adr.status === "deprecated" ? "text-[var(--color-error)]" :
-                          "text-[#555]"
-                        }`}>
-                          {adr.status}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </DrawerSection>
-
-              <DrawerSection
-                title="Checkpoints"
-                icon={<span className="text-xs font-mono">{"\u2691"}</span>}
-                count={asArr(checkpointsData?.timeline).length || undefined}
-                forceOpen={activeSection === "checkpoints" ? true : undefined}
-              >
-                {asArr(checkpointsData?.timeline).length > 0 ? (
-                  <div className="space-y-1.5 max-h-80 overflow-y-auto tui-scrollbar">
-                    {asArr(checkpointsData?.timeline).map((commit: ApiData, i: number) => {
-                      const sha = (commit.sha as string) || "";
-                      const shortSha = sha.slice(0, 8);
-                      const message = (commit.message as string) || "commit";
-                      const ts = (commit.timestamp as string) || "";
-                      const filesChanged = (commit.files_changed as number) || 0;
-                      const insertions = (commit.insertions as number) || 0;
-                      const deletions = (commit.deletions as number) || 0;
-                      const isResetting = resettingTo === sha;
-                      return (
-                        <div key={sha || i} className="p-2 bg-[#121212] border border-[#222] border-l-2 border-l-[var(--color-accent)]/40">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="text-[10px] font-mono text-[var(--color-accent)] shrink-0 bg-[var(--color-accent)]/10 px-1.5 py-0.5">
-                              {shortSha}
-                            </span>
-                            <span className="text-xs font-mono text-[#E0E0E0] truncate flex-1">{message}</span>
-                            {i > 0 && (
-                              <button
-                                onClick={() => handleGitReset(sha)}
-                                disabled={!!resettingTo}
-                                className="text-[10px] font-mono px-2 py-0.5 border border-[var(--color-warning)]/30 text-[var(--color-warning)] hover:bg-[var(--color-warning)]/10 transition-colors disabled:opacity-40 shrink-0"
-                              >
-                                {isResetting ? "..." : "Revert"}
-                              </button>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-3 text-[10px] font-mono text-[#555]">
-                            {ts && <span>{formatTime(ts)}</span>}
-                            {filesChanged > 0 && <span>{filesChanged} file{filesChanged !== 1 ? "s" : ""}</span>}
-                            {insertions > 0 && <span className="text-[var(--color-success)]">+{insertions}</span>}
-                            {deletions > 0 && <span className="text-[var(--color-error)]">−{deletions}</span>}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <p className="text-xs font-mono text-[#555]">
-                    No commits yet — checkpoints appear here as the agent makes git commits
-                  </p>
-                )}
-              </DrawerSection>
-              </>
-              )}
-
-              {/* ── Swarm tab (conditional) ── */}
+              {/* ═══════════════════ Swarm tab (conditional) ═══════════════════ */}
               {activeDrawerTab === "swarm" && isSwarmMode && (
                 <SwarmPanel
                   projectDir={projectPath}

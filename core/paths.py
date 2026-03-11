@@ -191,6 +191,10 @@ class ProjectPaths:
     def lsp_config(self) -> Path:
         return self.swarmweaver_dir / "lsp.yaml"
 
+    @property
+    def sessions_db(self) -> Path:
+        return self.swarmweaver_dir / "sessions.db"
+
     # ------------------------------------------------------------------
     # Artifact lookup
     # ------------------------------------------------------------------

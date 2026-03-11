@@ -27,7 +27,7 @@
 | Agent loop, orchestrators, merge | `core/` (agent.py, engine.py, orchestrator.py, smart_orchestrator.py, merge_resolver.py) |
 | Watchdog health monitoring | `services/watchdog.py` (state machine, AI triage, circuit breaker, event store) |
 | LSP code intelligence | `services/lsp_client.py`, `lsp_manager.py`, `lsp_intelligence.py`, `lsp_tools.py`, `hooks/lsp_hooks.py` |
-| State persistence (tasks, sessions, budget) | `state/` (task_list.py, session_state.py, budget.py, mail.py, events.py) |
+| State persistence (tasks, sessions, budget) | `state/` (task_list.py, session_state.py, sessions.py, snapshots.py, budget.py, mail.py, events.py) |
 | Mode capabilities (steering, verification) | `features/` (steering.py, verification.py, approval.py) |
 | API endpoints and models | `api/` (routers/, models.py, app.py) |
 | Web UI components | `frontend/app/components/` |
@@ -42,6 +42,8 @@
 - `core/smart_orchestrator.py` — SmartOrchestrator (AI-orchestrated dynamic workers).
 - `core/merge_resolver.py` — 4-tier merge conflict resolution (clean → auto → AI → reimagine).
 - `core/merge_queue.py` — SQLite FIFO merge queue for swarm branch merges.
+- `state/sessions.py` — Persistent session DB: SessionStore + GlobalSessionIndex (SQLite WAL, per-turn messages, file changes, analytics).
+- `state/snapshots.py` — Shadow git snapshot system: capture/diff/restore/revert; shadow repo at `~/.swarmweaver/snapshots/`.
 - `services/watchdog.py` — SwarmWatchdog: 9-state machine, 6-signal health evaluation, AI triage, circuit breaker, heartbeat protocol, persistent SQLite event log.
 - `frontend/` is a Next.js 15 app (`app/components`, `app/hooks`, `app/utils`).
 - `prompts/` holds mode and role templates; `templates/` holds starter specs; `tests/` holds Python regression tests.
@@ -63,6 +65,8 @@
 - MELS expertise system (cross-project + project-local, real-time lesson synthesis), budget tracking, cost analysis
 - Inter-agent mail system: typed payloads, context injection, attachments, dead letter queue, analytics (`swarmweaver mail` CLI)
 - User-configurable MCP servers (global + per-project) with built-in puppeteer and web search
+- Persistent session database (SQLite) with cross-project indexing, per-turn message recording, and analytics
+- Shadow git snapshots — full project state captured before/after each agent turn with per-file diff and surgical revert
 - Chat wizard flow with streaming (QA, architect, plan, security review)
 - 4-tier merge conflict resolution for swarm
 

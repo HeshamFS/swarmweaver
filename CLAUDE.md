@@ -136,7 +136,7 @@ swarmweaver/                  # Project root (SwarmWeaver)
 │   └── wizard.py                 # Interactive wizard flow
 ├── api/                        # FastAPI package — app factory, routers, WebSocket
 │   ├── app.py                    # FastAPI app factory
-│   ├── routers/                  # One router per domain (tasks, swarm, worktree, mcp, …)
+│   ├── routers/                  # One router per domain (tasks, swarm, worktree, mcp, sessions, snapshots, …)
 │   ├── websocket/                # WebSocket stream handlers
 │   ├── helpers.py                # Shared request/response helpers
 │   ├── models.py                 # Pydantic request/response models
@@ -169,7 +169,10 @@ swarmweaver/                  # Project root (SwarmWeaver)
 ├── state/                      # Task list, sessions, processes, budget, mail, events
 │   ├── task_list.py              # Universal task list with dependencies and verification
 │   ├── session_state.py          # Session ID tracking and resumption
+│   ├── sessions.py               # Persistent session DB (SessionStore + GlobalSessionIndex, SQLite WAL)
+│   ├── snapshots.py              # Shadow git snapshot system (SnapshotManager, capture/diff/restore/revert)
 │   ├── checkpoints.py            # File state checkpoints for rollback
+│   ├── session_checkpoint.py     # Session chain entries with snapshot hashes
 │   ├── process_registry.py       # Background process tracking (PID, port, type)
 │   ├── agent_identity.py         # Agent identity store (name, role, success rate, CV)
 │   ├── budget.py                 # Cost tracking and circuit breakers
@@ -309,6 +312,10 @@ Decision logic in `main()` and server: `smart_swarm` → SmartSwarm; `parallel >
 | `services/lsp_manager.py` | 22 built-in language servers, lifecycle, auto-detect, auto-install, health loop |
 | `services/lsp_intelligence.py` | Impact analysis, unused code detection, dependency graph, code health score |
 | `services/lsp_tools.py` | Worker MCP tools: `lsp_query` (13 operations), `lsp_diagnostics_summary` |
+| `state/sessions.py` | Persistent session DB: SessionStore (project-local) + GlobalSessionIndex (cross-project), SQLite WAL mode |
+| `state/snapshots.py` | Shadow git snapshot system: SnapshotManager with capture, diff, restore, per-file revert; shadow repo at `~/.swarmweaver/snapshots/<hash>/` |
+| `api/routers/session_history.py` | 9 REST endpoints for session history (list, detail, messages, files, archive, delete, analytics, global, migrate) |
+| `api/routers/snapshots.py` | 8 REST endpoints for snapshots (list, diff, diff/file, files, revert, restore, cleanup, status) |
 | `state/mail.py` | Inter-agent MailStore: typed payloads, context injection, attachments, dead letters, rate limiting, analytics |
 | `web_search_server.py` | MCP server that wraps Claude's web search tool for agent use |
 
@@ -432,6 +439,8 @@ Key endpoint categories:
 | QA/Architect/Plan/Scan | `POST /api/qa/generate`, `POST /api/architect/generate`, `POST /api/plan/generate`, `POST /api/scan/generate`, `POST /api/analyze/generate`, `POST /api/project/prepare` |
 | Specs | `GET /api/specs`, `GET/POST /api/specs/{task_id}` |
 | Watchdog | `GET /api/watchdog/events`, `GET /api/watchdog/config`, `PUT /api/watchdog/config` |
+| Session History | `GET /api/sessions`, `GET /api/sessions/{id}`, `GET /api/sessions/{id}/messages`, `GET /api/sessions/{id}/files`, `POST /api/sessions/{id}/archive`, `DELETE /api/sessions/{id}`, `GET /api/sessions/analytics`, `GET /api/sessions/global`, `POST /api/sessions/migrate` |
+| Snapshots | `GET /api/snapshots`, `GET /api/snapshots/diff`, `GET /api/snapshots/diff/file`, `GET /api/snapshots/files`, `POST /api/snapshots/revert`, `POST /api/snapshots/restore`, `POST /api/snapshots/cleanup`, `GET /api/snapshots/status` |
 | Fleet | `GET /api/fleet/health` |
 | MCP | `GET/POST/PUT/DELETE /api/mcp/servers`, `POST /api/mcp/servers/{name}/enable\|disable\|test`, `POST /api/mcp/servers/validate`, `GET /api/mcp/export`, `POST /api/mcp/import` |
 | LSP | `GET /api/lsp/status`, `GET /api/lsp/diagnostics`, `POST /api/lsp/hover\|definition\|references\|symbols\|call-hierarchy`, `GET /api/lsp/servers`, `POST /api/lsp/servers/{id}/restart`, `GET/PUT /api/lsp/config`, `GET /api/lsp/impact-analysis`, `GET /api/lsp/code-health` |
@@ -478,6 +487,7 @@ All SwarmWeaver artifacts are consolidated under `.swarmweaver/` — delete it a
 │   ├── events.db                    # Structured event store
 │   ├── watchdog.yaml                # Watchdog health monitor configuration
 │   ├── watchdog_events.db           # Persistent watchdog event log (SQLite)
+│   ├── sessions.db                 # Persistent session database (SQLite WAL; sessions, messages, file_changes)
 │   └── lsp.yaml                    # LSP code intelligence configuration
 ├── init.sh                        # Environment setup script (greenfield, stays at root)
 └── docs/adr/                      # Architecture Decision Records (stays at root)
@@ -692,7 +702,7 @@ The execution dashboard uses a **command-center layout** with resizable panels:
 +------------------------------------------------------------------+
 ```
 
-#### Observe Panel Sub-tabs (9 total)
+#### Observe Panel Sub-tabs (11 total)
 
 | Sub-tab | Component | Data Source |
 |---------|-----------|-------------|
@@ -703,5 +713,33 @@ The execution dashboard uses a **command-center layout** with resizable panels:
 | Audit | Built-in | `.swarmweaver/audit.log` |
 | Insights | `InsightsPanel.tsx` | `/api/insights` |
 | Agents | `AgentIdentityPanel.tsx` | `/api/agents` |
-| Checkpoints | `CheckpointPanel.tsx` | `/api/checkpoints` |
+| Checkpoints | `CheckpointPanel.tsx` + `SnapshotPanel.tsx` | `/api/checkpoints` + `/api/snapshots` |
+| Sessions | `SessionBrowserPanel.tsx` | `/api/sessions` + WS `session_db_*` |
 | Profile | Built-in | Session profiling data |
+| Code Intel | `LSPPanel.tsx` | `/api/lsp/*` + WS `lsp.*` |
+
+#### Persistent Session Database
+
+`state/sessions.py` provides SQLite-backed session persistence (WAL mode, `busy_timeout=5000`):
+
+- **SessionStore** (project-local at `.swarmweaver/sessions.db`) — records sessions, per-turn messages with tokens/cost/snapshots, file changes via `git diff`, cumulative analytics
+- **GlobalSessionIndex** (cross-project at `~/.swarmweaver/sessions.db`) — aggregated session metadata for global analytics
+
+Wired into:
+- `core/engine.py` — 5 insertion points: init, session creation, per-turn message recording, completion with change summary, error handling
+- `core/smart_orchestrator.py` — team session creation, per-worker message recording via `session_result` event, completion
+
+WebSocket events: `session_db_created`, `session_db_updated`, `session_db_completed`
+
+#### Shadow Git Snapshot System
+
+`state/snapshots.py` provides a shadow git repository at `~/.swarmweaver/snapshots/<project_hash>/` (ext4, NOT NTFS):
+
+- **Pre/post capture** before and after each agent turn via `git write-tree`
+- **Structured diffs** between any two snapshots
+- **Per-file revert** and full restore
+- **Graceful degradation** — all operations fail silently, returning None/False
+
+Wired into `core/engine.py` with pre-turn and post-turn capture points. Snapshot hashes are stored in `ChainEntry` (`state/session_checkpoint.py`) and message records.
+
+WebSocket events: `snapshot_captured`

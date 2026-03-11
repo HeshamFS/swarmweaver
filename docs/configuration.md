@@ -175,7 +175,16 @@ Each target project gets a `.swarmweaver/` directory with session state and arti
 | `mail.db` | Inter-agent mail database (SQLite WAL mode) |
 | `watchdog.yaml` | Watchdog health monitor configuration |
 | `watchdog_events.db` | Persistent watchdog event log (SQLite) |
+| `sessions.db` | Persistent session database — sessions, messages, file changes (SQLite WAL) |
 | `lsp.yaml` | LSP code intelligence configuration |
+
+**Cross-project stores** (at `~/.swarmweaver/`):
+
+| File | Purpose |
+|------|---------|
+| `sessions.db` | Global session index — cross-project session metadata and analytics |
+| `expertise/expertise.db` | MELS cross-project expertise store |
+| `snapshots/<hash>/` | Shadow git snapshot repos — full project state before/after each agent turn |
 
 Delete `.swarmweaver/` to reset a project; SwarmWeaver will recreate it on the next run.
 

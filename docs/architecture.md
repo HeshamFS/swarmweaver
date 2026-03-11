@@ -2,6 +2,73 @@
 
 This document describes SwarmWeaver's package structure, execution flow, and security model. For a high-level overview, see [overview.md](overview.md).
 
+## System Architecture
+
+```mermaid
+flowchart TB
+    %% Entry
+    CLI["CLI"] & WebUI["Web UI"] & API["REST API"] --> Router
+
+    %% Routing
+    Router{"6 Modes x 3 Execution Paths"} -->|"default"| Engine["Engine"]
+    Router -->|"--parallel N"| Swarm["SwarmOrchestrator"]
+    Router -->|"--smart-swarm"| SmartSwarm["SmartOrchestrator"]
+
+    %% Prompt
+    Engine & Swarm & SmartSwarm --> Prompt["Prompt Assembly"]
+    Templates["Mode Templates"] & MELS_P["MELS Expertise"] & Mail["Mail Updates"] --> Prompt
+
+    %% SDK + Phase Loop
+    Prompt --> SDK["Claude SDK Client\nHooks + MCP Servers + Security"]
+    SDK --> Loop
+
+    subgraph Loop [" Phase Loop "]
+        Pre["PreToolUse\nSecurity + Scope + Steering"] --> Tools["Tool Execution"] --> Post["PostToolUse\nAudit + LSP + Mail + Marathon"]
+        Post --> Gate{"Done?"}
+        Gate -->|"No"| Pre
+    end
+
+    %% Outputs
+    Gate -->|"Yes"| Harvest["Lesson Harvest"] --> MELS[("MELS\nExpertise Store")]
+    MELS --> MELS_P
+    Gate -->|"Yes"| Output["Working Code"]
+
+    %% State (side)
+    SDK -.-> State[("State\nSessions + Snapshots\nTasks + Budget")]
+
+    %% Multi-Agent (side)
+    Swarm & SmartSwarm --> Multi
+    subgraph Multi [" Multi-Agent "]
+        Worktrees["Git Worktrees"] --> Merge["4-Tier Merge"]
+        MailSys["Mail System"] --> Mail
+        Watchdog["Watchdog"] & LSP["LSP Intelligence"]
+    end
+
+    %% Frontend
+    SDK -.->|"WebSocket"| UI["Frontend\nTerminal + Tasks + Observability + Swarm"]
+
+    %% Styles
+    classDef entry fill:#e3f2fd,stroke:#1565c0,color:#000
+    classDef engine fill:#e8f5e9,stroke:#2e7d32,color:#000
+    classDef prompt fill:#f3e5f5,stroke:#6a1b9a,color:#000
+    classDef hook fill:#fce4ec,stroke:#c62828,color:#000
+    classDef state fill:#e0f2f1,stroke:#00695c,color:#000
+    classDef mels fill:#fff8e1,stroke:#f9a825,color:#000
+    classDef multi fill:#e8eaf6,stroke:#283593,color:#000
+    classDef ui fill:#fafafa,stroke:#424242,color:#000
+
+    class CLI,WebUI,API entry
+    class Engine,Swarm,SmartSwarm engine
+    class Prompt,Templates,MELS_P,Mail prompt
+    class Pre,Tools,Post hook
+    class State state
+    class MELS,Harvest mels
+    class Worktrees,Merge,MailSys,Watchdog,LSP multi
+    class UI ui
+```
+
+Solid arrows = primary data flow. Dotted arrows = persistence and real-time streaming. See dedicated docs for each subsystem: [swarm](swarm.md) | [MELS](mels.md) | [security](security.md) | [sessions](session-history.md) | [watchdog](watchdog.md) | [mail](mail.md) | [LSP](lsp.md)
+
 ## Package Map
 
 ```
@@ -46,6 +113,8 @@ swarmweaver/
 ├── state/                       # Persistence layer
 │   ├── task_list.py               # Universal task list with dependencies
 │   ├── session_state.py           # Session ID tracking and resumption
+│   ├── sessions.py                # Persistent session DB (SessionStore + GlobalSessionIndex)
+│   ├── snapshots.py               # Shadow git snapshot system (SnapshotManager)
 │   ├── checkpoints.py             # File state checkpoints for rollback
 │   ├── budget.py                  # Cost tracking and circuit breakers
 │   ├── mail.py                    # Inter-agent MailStore (SQLite; typed payloads, attachments, analytics)
@@ -277,8 +346,41 @@ Additionally:
 - **Role-based capability enforcement** (`hooks/capability_hooks.py`) — Scout/Reviewer = read-only; Builder = scoped writes; Lead = coordination only
 - **Secret sanitizer** (`utils/sanitizer.py`) — Redacts API keys, tokens, and passwords from all output
 
+## Session Persistence & Snapshots
+
+SwarmWeaver includes two complementary systems for recording session history and enabling file-level undo:
+
+### Persistent Session Database
+
+`state/sessions.py` provides SQLite-backed (WAL mode) session persistence:
+
+- **SessionStore** at `.swarmweaver/sessions.db` — records every session, agent turn (with token counts, cost, duration), and file changes
+- **GlobalSessionIndex** at `~/.swarmweaver/sessions.db` — cross-project session aggregation
+- Wired into `core/engine.py` (5 insertion points) and `core/smart_orchestrator.py` (team sessions with per-worker messages)
+- 9 REST endpoints at `/api/sessions/*` — list, detail, messages, files, archive, delete, analytics, global, migrate
+- WebSocket events: `session_db_created`, `session_db_updated`, `session_db_completed`
+
+### Shadow Git Snapshot System
+
+`state/snapshots.py` provides a separate git repo at `~/.swarmweaver/snapshots/<project_hash>/`:
+
+- Captures full project state before/after each agent turn via `git write-tree`
+- Per-file revert, full restore, structured diffs between any two snapshots
+- Shadow repo on ext4 (not NTFS) for performance; graceful degradation on failure
+- 8 REST endpoints at `/api/snapshots/*` — list, diff, diff/file, files, revert, restore, cleanup, status
+- WebSocket event: `snapshot_captured`
+
+See [session-history.md](session-history.md) for full details.
+
 ## Related
 
 - [overview.md](overview.md) — High-level concepts and modes
 - [getting-started.md](getting-started.md) — Installation and first run
+- [swarm.md](swarm.md) — Multi-agent swarm orchestration
+- [mels.md](mels.md) — Multi-Expertise Learning System
+- [security.md](security.md) — Security model in detail
+- [session-history.md](session-history.md) — Session database and shadow git snapshots
+- [watchdog.md](watchdog.md) — Health monitoring and AI triage
+- [mail.md](mail.md) — Inter-agent mail system
+- [lsp.md](lsp.md) — LSP code intelligence
 - [configuration.md](configuration.md) — Environment and config files

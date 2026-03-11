@@ -72,6 +72,8 @@ class ChainEntry:
     tasks_completed: int = 0
     tasks_total: int = 0
     cost: float = 0.0
+    snapshot_before: str = ""
+    snapshot_after: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)

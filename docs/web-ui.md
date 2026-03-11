@@ -76,7 +76,7 @@ Real-time updates via WebSocket events: `watchdog_state_change`, `watchdog_nudge
 
 ### Observability Panel
 
-Ten sub-tabs for deep inspection:
+Eleven sub-tabs for deep inspection:
 
 | Sub-tab | Content |
 |---------|---------|
@@ -87,9 +87,39 @@ Ten sub-tabs for deep inspection:
 | Audit | Tool execution log |
 | Insights | Session analytics (top tools, hot files) |
 | Agents | Agent identity and success rates |
-| Checkpoints | File state checkpoints for rollback |
+| Checkpoints | File state checkpoints + shadow git snapshot timeline (see below) |
+| Sessions | Persistent session browser with full detail view (see below) |
 | Profile | Session profiling data |
 | Code Intel | LSP diagnostic dashboard (see below) |
+
+### Sessions Tab
+
+Browse all persistent session records with:
+
+- **Session list** — Mode badges, status dots (running/completed/error/archived), cost, duration, task progress bar
+- **Filter bar** — Filter by mode (chips) and status
+- **Session detail view** — Click any session to see three sub-tabs:
+  - **Timeline** — Phase transitions and agent turns
+  - **Messages** — Prompt/response pairs with token counts and cost per turn
+  - **Files** — Changed files with additions/deletions stats
+
+Data from `/api/sessions` endpoints. Real-time updates via WebSocket events: `session_db_created`, `session_db_updated`, `session_db_completed`.
+
+### Snapshot Timeline
+
+The Checkpoints tab includes a shadow git snapshot timeline alongside file checkpoints:
+
+- **Snapshot pairs** — Pre/post snapshots per iteration, grouped by phase with color-coded badges
+- **Compare button** — Opens a diff drawer between pre and post snapshots of any iteration
+- **Diff drawer** — Slide-out panel with:
+  - File list with additions/deletions stats and status indicators (A/M/D)
+  - Expandable per-file unified diffs with syntax coloring
+  - Multi-select checkboxes for batch file selection
+  - Revert button to surgically restore selected files from a snapshot
+- **Status bar** — Shows snapshot count and shadow repo size in MB
+- **Auto-refresh** — Polls every 10 seconds while a session is running
+
+Data from `/api/snapshots` endpoints. Real-time updates via WebSocket `snapshot_captured` event.
 
 ### Code Intel Tab (LSP)
 
@@ -133,7 +163,7 @@ The execution dashboard uses a command-center layout with resizable panels:
 - **Activity sidebar** — Collapsible session list
 - **Terminal** — Primary agent output
 - **Inspector** — Tabbed: Tasks, ADRs, Notes
-- **Observe panel** — Timeline, Files, Costs, Errors, Audit, Insights, Agents, Checkpoints, Profile
+- **Observe panel** — Timeline, Files, Costs, Errors, Audit, Insights, Agents, Checkpoints, Sessions, Profile, Code Intel
 - **Floating action bar** — Steering input, stop button, progress
 
 ---

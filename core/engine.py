@@ -156,6 +156,11 @@ class Engine:
         # LSP integration
         self._lsp_manager = lsp_manager
         self._file_scope: Optional[list[str]] = file_scope
+        # Persistent session database + shadow git snapshots
+        self._session_store = None
+        self._persistent_session_id: Optional[str] = None
+        self._snapshot_mgr = None
+        self._turn_number: int = 0
 
     @staticmethod
     async def _noop_event(event: dict) -> None:
@@ -194,6 +199,37 @@ class Engine:
                 quiet=True,
             )
             ctx = self._ctx
+
+            # Initialize persistent session database
+            try:
+                from state.sessions import SessionStore
+                self._session_store = SessionStore(self.project_dir)
+                self._session_store.initialize()
+                self._persistent_session_id = self._session_store.create_session(
+                    mode=self.mode,
+                    model=self.model,
+                    task_input=self.task_input,
+                    chain_id=ctx.chain_id,
+                    is_team=False,
+                    agent_count=1,
+                )
+                await self.emit({
+                    "type": "session_db_created",
+                    "data": {"session_id": self._persistent_session_id},
+                })
+            except Exception as e:
+                print(f"[Engine] SessionStore init failed (non-fatal): {e}", flush=True)
+                self._session_store = None
+
+            # Initialize shadow git snapshot manager
+            try:
+                from state.snapshots import SnapshotManager
+                self._snapshot_mgr = SnapshotManager(self.project_dir)
+                if not self._snapshot_mgr.is_available():
+                    self._snapshot_mgr = None
+            except Exception as e:
+                print(f"[Engine] SnapshotManager init failed (non-fatal): {e}", flush=True)
+                self._snapshot_mgr = None
 
             starting_iteration = ctx.iteration
             iteration = ctx.iteration
@@ -431,6 +467,21 @@ class Engine:
                     # Stream the session
                     session_start_time = datetime.now()
 
+                    # Pre-turn snapshot capture
+                    snap_before = None
+                    if self._snapshot_mgr:
+                        try:
+                            snap_before = self._snapshot_mgr.capture(
+                                f"pre:{clean_phase}:{iteration}",
+                                session_id=self._persistent_session_id or "",
+                                phase=clean_phase,
+                                iteration=iteration,
+                            )
+                        except Exception as e:
+                            print(f"[Engine] Pre-turn snapshot failed: {e}", flush=True)
+
+                    self._turn_number += 1
+
                     # Emit session start (includes start_time for frontend timer)
                     await self.emit({
                         "type": "session_start",
@@ -472,6 +523,31 @@ class Engine:
                         raise
 
                     self._current_client = None
+
+                    # Post-turn snapshot capture
+                    snap_after = None
+                    if self._snapshot_mgr:
+                        try:
+                            snap_after = self._snapshot_mgr.capture(
+                                f"post:{clean_phase}:{iteration}",
+                                session_id=self._persistent_session_id or "",
+                                phase=clean_phase,
+                                iteration=iteration,
+                            )
+                        except Exception as e:
+                            print(f"[Engine] Post-turn snapshot failed: {e}", flush=True)
+
+                    # Emit snapshot event
+                    if snap_before or snap_after:
+                        await self.emit({
+                            "type": "snapshot_captured",
+                            "data": {
+                                "before": snap_before,
+                                "after": snap_after,
+                                "phase": clean_phase,
+                                "iteration": iteration,
+                            },
+                        })
 
                     # Save session state
                     if session_id:
@@ -580,8 +656,51 @@ class Engine:
                             tasks_total=tasks_total,
                             cost=bs["real_cost_usd"] or bs["estimated_cost_usd"],
                         )
+                        chain_entry.snapshot_before = snap_before or ""
+                        chain_entry.snapshot_after = snap_after or ""
                         ctx.chain_manager.add_entry(chain_entry)
                         ctx.sequence_number += 1
+
+                    # Record turn in persistent session database
+                    if self._session_store and self._persistent_session_id:
+                        try:
+                            duration_ms = int((datetime.now() - session_start_time).total_seconds() * 1000)
+                            summary_text_db = response.strip()[:500] if response else ""
+                            self._session_store.record_message(
+                                session_id=self._persistent_session_id,
+                                agent_name=f"worker-{self._worker_id}" if self._worker_id else "main",
+                                phase=clean_phase,
+                                role="assistant",
+                                content_summary=summary_text_db,
+                                input_tokens=usage.get("input_tokens", 0) if usage else 0,
+                                output_tokens=usage.get("output_tokens", 0) if usage else 0,
+                                cost_usd=usage.get("cost_usd", 0.0) if usage else 0.0,
+                                model=phase_model,
+                                sdk_session_id=session_id,
+                                turn_number=self._turn_number,
+                                duration_ms=duration_ms,
+                                snapshot_before=snap_before,
+                                snapshot_after=snap_after,
+                            )
+                            # Update task progress
+                            try:
+                                tl_prog = TaskList(self.project_dir)
+                                tl_prog.load()
+                                done = len([t for t in tl_prog.tasks if t.status == "done"]) if tl_prog.tasks else 0
+                                total = len(tl_prog.tasks) if tl_prog.tasks else 0
+                                self._session_store.update_session(
+                                    self._persistent_session_id,
+                                    tasks_completed=done,
+                                    tasks_total=total,
+                                )
+                            except Exception:
+                                pass
+                            await self.emit({
+                                "type": "session_db_updated",
+                                "data": {"session_id": self._persistent_session_id, "turn": self._turn_number},
+                            })
+                        except Exception as e:
+                            print(f"[Engine] Session message recording failed: {e}", flush=True)
 
                     # Push task list update
                     try:
@@ -648,6 +767,36 @@ class Engine:
 
             # --- Post-session ---
             await self._post_session(ctx)
+
+            # Complete persistent session record
+            final_status = "stopped" if self._stopped else "completed"
+            if self._session_store and self._persistent_session_id:
+                try:
+                    self._session_store.complete_session(
+                        self._persistent_session_id, status=final_status
+                    )
+                    change_summary = self._session_store.compute_change_summary(
+                        self._persistent_session_id
+                    )
+                    self._session_store.sync_to_global(self._persistent_session_id)
+                    await self.emit({
+                        "type": "session_db_completed",
+                        "data": {
+                            "session_id": self._persistent_session_id,
+                            "status": final_status,
+                            "change_summary": change_summary,
+                        },
+                    })
+                except Exception as e:
+                    print(f"[Engine] Session completion recording failed: {e}", flush=True)
+
+            # Snapshot cleanup
+            if self._snapshot_mgr:
+                try:
+                    self._snapshot_mgr.cleanup()
+                except Exception:
+                    pass
+
             if self._stopped:
                 await self.emit({"type": "status", "data": "stopped"})
             else:
@@ -657,6 +806,18 @@ class Engine:
             # SDK errors must propagate for retry logic in smart_orchestrator
             raise
         except Exception as e:
+            # Mark persistent session as error
+            if self._session_store and self._persistent_session_id:
+                try:
+                    self._session_store.complete_session(
+                        self._persistent_session_id,
+                        status="error",
+                        error_message=str(e)[:500],
+                    )
+                    self._session_store.sync_to_global(self._persistent_session_id)
+                except Exception:
+                    pass
+
             if self._stopped:
                 # Exception caused by interrupt — emit stopped, not error
                 await self.emit({"type": "status", "data": "stopped"})

@@ -331,6 +331,16 @@ class SmartOrchestrator:
         # Track startup time — only read mail sent AFTER this timestamp
         self._start_time: str = datetime.utcnow().isoformat() + "Z"
 
+        # Persistent session database
+        self._session_store = None
+        self._persistent_session_id: Optional[str] = None
+        try:
+            from state.sessions import SessionStore
+            self._session_store = SessionStore(self.project_dir)
+            self._session_store.initialize()
+        except Exception as e:
+            print(f"[ORCHESTRATOR] SessionStore init failed (non-fatal): {e}", flush=True)
+
         # Pre-create swarm directory to avoid WSL/NTFS ghost-file issues
         swarm_dir = self.project_dir / ".swarmweaver" / "swarm"
         try:
@@ -432,6 +442,24 @@ class SmartOrchestrator:
             })
 
             self._mail.initialize()
+
+            # Create persistent session record
+            if self._session_store:
+                try:
+                    self._persistent_session_id = self._session_store.create_session(
+                        mode=self.mode,
+                        model=self.model,
+                        task_input=self.task_input,
+                        is_team=True,
+                        agent_count=self.max_workers,
+                    )
+                    await self.emit({
+                        "type": "session_db_created",
+                        "data": {"session_id": self._persistent_session_id},
+                    })
+                except Exception as e:
+                    print(f"[ORCHESTRATOR] Session record creation failed: {e}", flush=True)
+
             # Wire WebSocket push for mail events (M2-1)
             def _mail_push(msg):
                 import asyncio as _aio
@@ -505,17 +533,49 @@ class SmartOrchestrator:
                     print(f"[ORCHESTRATOR] Unexpected error: {e}", flush=True)
                     break
 
+            # Complete persistent session record
+            final_status = "stopped" if self._stopped else "completed"
+            if self._session_store and self._persistent_session_id:
+                try:
+                    self._session_store.complete_session(
+                        self._persistent_session_id, status=final_status
+                    )
+                    self._session_store.compute_change_summary(
+                        self._persistent_session_id
+                    )
+                    self._session_store.sync_to_global(self._persistent_session_id)
+                    await self.emit({
+                        "type": "session_db_completed",
+                        "data": {
+                            "session_id": self._persistent_session_id,
+                            "status": final_status,
+                        },
+                    })
+                except Exception as e:
+                    print(f"[ORCHESTRATOR] Session completion failed: {e}", flush=True)
+
             # Emit status BEFORE cleanup so the WebSocket is still alive when
             # the notification reaches the frontend.  Cleanup uses blocking I/O
             # (subprocess git commands + shutil.rmtree) which would stall the
             # event loop and cause ECONNRESET on in-flight polling requests.
-            final_status = "stopped" if self._stopped else "completed"
             await self.emit({"type": "status", "data": final_status})
 
             # Cleanup runs after status is delivered
             await self._cleanup()
 
         except Exception as e:
+            # Mark persistent session as error
+            if self._session_store and self._persistent_session_id:
+                try:
+                    self._session_store.complete_session(
+                        self._persistent_session_id,
+                        status="error",
+                        error_message=str(e)[:500],
+                    )
+                    self._session_store.sync_to_global(self._persistent_session_id)
+                except Exception:
+                    pass
+
             if self._stopped:
                 await self.emit({"type": "status", "data": "stopped"})
             else:
@@ -1041,6 +1101,26 @@ class SmartOrchestrator:
                 )
                 # Self-correction: check if a lesson matches this error
                 self._try_self_correction(worker_id, tool_err_msg, worktree_path)
+
+            elif etype == "session_result":
+                # Record per-worker turn in persistent session database
+                if self._session_store and self._persistent_session_id:
+                    try:
+                        self._session_store.record_message(
+                            session_id=self._persistent_session_id,
+                            agent_name=name,
+                            phase=evdata.get("phase", ""),
+                            role="assistant",
+                            content_summary=f"Worker {name} {evdata.get('status', 'unknown')} (phase: {evdata.get('phase', '')})",
+                            input_tokens=evdata.get("input_tokens", 0),
+                            output_tokens=evdata.get("output_tokens", 0),
+                            cost_usd=evdata.get("total_cost_usd", 0.0),
+                            model=evdata.get("model", self.model),
+                            turn_number=evdata.get("session", 0),
+                            duration_ms=int(evdata.get("duration_s", 0) * 1000),
+                        )
+                    except Exception as _db_err:
+                        print(f"[ORCHESTRATOR] Worker message recording failed: {_db_err}", flush=True)
 
             elif etype == "budget_exceeded":
                 asyncio.create_task(self._broadcast_budget_stop(

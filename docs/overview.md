@@ -39,6 +39,8 @@ All modes share these capabilities:
 - **Verification loop** — Self-healing test verification
 - **MELS expertise system** — Multi-Expertise Learning System with cross-project knowledge, real-time intra-session lesson synthesis, and token-budget-aware priming
 - **4-tier merge resolution** — Clean → auto → AI → reimagine for swarm conflicts
+- **Session persistence** — SQLite-backed session database with per-turn recording and cross-project indexing
+- **Shadow git snapshots** — Full project state captured before/after each agent turn with per-file diff and revert
 - **Security allowlist** — Bash commands validated against an allowlist (~60+ commands)
 
 ## End-to-End Workflow
@@ -79,6 +81,8 @@ flowchart TB
     F --> J
 ```
 
+For the **complete system architecture diagram** — showing all subsystems (hooks, MELS, watchdog, LSP, mail, state persistence, frontend) and how they interconnect — see [architecture.md](architecture.md#system-architecture).
+
 ## Execution Paths
 
 - **Single agent** — Default; one Claude session with phase loop
@@ -88,9 +92,16 @@ flowchart TB
 ## Related Documentation
 
 - [Getting Started](getting-started.md) — Installation and first run
-- [Architecture](architecture.md) — Package map, execution flow, security
+- [Architecture](architecture.md) — Package map, execution flow
 - [CLI Reference](cli-reference.md) — Commands and flags
 - [Web UI](web-ui.md) — Dashboard capabilities
+- [Swarm Orchestration](swarm.md) — Multi-agent swarm modes and merge resolution
+- [MELS Expertise](mels.md) — Cross-project learning system
+- [Security](security.md) — Bash allowlist, role capabilities, secret sanitizer
+- [Session History & Snapshots](session-history.md) — Session database and shadow git snapshots
+- [Watchdog](watchdog.md) — Health monitoring and AI triage
+- [Mail System](mail.md) — Inter-agent messaging
+- [LSP Code Intelligence](lsp.md) — Language server integration
 - [Configuration](configuration.md) — Environment and config files
 
 [← Back to docs index](README.md) | [Main README](../README.md)

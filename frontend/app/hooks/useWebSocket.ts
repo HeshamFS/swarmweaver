@@ -675,6 +675,16 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
                 data: d as Record<string, unknown>,
               } as AgentEvent,
             ]);
+          } else if (msg.type === "session_db_created" || msg.type === "session_db_updated" || msg.type === "session_db_completed" || msg.type === "snapshot_captured") {
+            // Persistent session DB + snapshot events — push to events feed
+            setEvents((prev) => [
+              ...prev,
+              {
+                type: msg.type,
+                timestamp: (msg.timestamp as string) || new Date().toISOString(),
+                data: (msg.data || {}) as Record<string, unknown>,
+              } as AgentEvent,
+            ]);
           } else if (msg.type && msg.timestamp && msg.type !== "output" && msg.type !== "status") {
             const safeData: Record<string, unknown> = {};
             if (msg.data && typeof msg.data === "object") {
