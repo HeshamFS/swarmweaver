@@ -24,7 +24,7 @@ def tmp_project(tmp_path):
     sw = project / ".swarmweaver"
     sw.mkdir()
     # Initialize git repo for compute_change_summary
-    os.system(f"cd {project} && git init && git commit --allow-empty -m init")
+    os.system(f"cd {project} && git init && git config user.email test@test.com && git config user.name Test && git commit --allow-empty -m init")
     return project
 
 
