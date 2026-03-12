@@ -1,6 +1,5 @@
-"""Tests for state/snapshots.py — SnapshotManager."""
+"""Tests for state/snapshots.py — Enhanced SnapshotManager with SQLite + bookmarks."""
 
-import json
 import os
 import subprocess
 import tempfile
@@ -37,6 +36,9 @@ class TestSnapshotManager:
         assert available
         shadow = manager._shadow_dir()
         assert (shadow / ".git").exists()
+        # SQLite DB is lazily created on first capture
+        manager.capture("init-test", session_id="s0")
+        assert (shadow / "snapshots.db").exists()
 
     def test_capture_returns_hash(self, manager):
         h = manager.capture("test-snap", session_id="s1", phase="code", iteration=1)
@@ -48,6 +50,21 @@ class TestSnapshotManager:
         h2 = manager.capture("snap2", session_id="s1")
         # Same content should produce same tree hash
         assert h1 == h2
+
+    def test_capture_records_in_sqlite(self, manager):
+        h = manager.capture("test-snap", session_id="s1", phase="code", iteration=1)
+        assert h is not None
+
+        # Verify SQLite record
+        snap = manager.get_snapshot(h)
+        assert snap is not None
+        assert snap["tree_hash"] == h
+        assert snap["commit_hash"]  # commit hash should exist
+        assert len(snap["commit_hash"]) == 40
+        assert snap["label"] == "test-snap"
+        assert snap["session_id"] == "s1"
+        assert snap["phase"] == "code"
+        assert snap["iteration"] == 1
 
     def test_diff_shows_changes(self, manager, tmp_project):
         h1 = manager.capture("before", session_id="s1")
@@ -116,12 +133,150 @@ class TestSnapshotManager:
         s1_snaps = manager.list_snapshots(session_id="s1")
         assert len(s1_snaps) == 2
 
+    def test_list_snapshots_backward_compat(self, manager):
+        """list_snapshots should include 'hash' key for backward compatibility."""
+        manager.capture("compat-test", session_id="s1")
+        snaps = manager.list_snapshots()
+        assert len(snaps) >= 1
+        # Should have both 'hash' and 'tree_hash' keys
+        assert "hash" in snaps[0]
+        assert "tree_hash" in snaps[0]
+        assert snaps[0]["hash"] == snaps[0]["tree_hash"]
+
     def test_cleanup(self, manager):
         manager.capture("old-snap", session_id="s1")
         manager.cleanup(max_age_days=0)
         # After cleanup with 0 days, all should be removed
         snaps = manager.list_snapshots()
         assert len(snaps) == 0
+
+
+class TestSnapshotBookmarks:
+    def test_bookmark_create(self, manager, tmp_project):
+        h = manager.capture("pre:code:1", session_id="s1", phase="code", iteration=1)
+        assert h is not None
+
+        success = manager.bookmark(h, "before-refactor", "State before big refactor")
+        assert success
+
+        bookmarks = manager.list_bookmarks()
+        assert len(bookmarks) == 1
+        assert bookmarks[0]["name"] == "before-refactor"
+        assert bookmarks[0]["description"] == "State before big refactor"
+        assert bookmarks[0]["tree_hash"] == h
+
+    def test_bookmark_get(self, manager, tmp_project):
+        h = manager.capture("test", session_id="s1")
+        manager.bookmark(h, "my-save")
+
+        bm = manager.get_bookmark("my-save")
+        assert bm is not None
+        assert bm["name"] == "my-save"
+        assert bm["tree_hash"] == h
+
+    def test_bookmark_delete(self, manager, tmp_project):
+        h = manager.capture("test", session_id="s1")
+        manager.bookmark(h, "temp-save")
+
+        assert len(manager.list_bookmarks()) == 1
+        manager.delete_bookmark("temp-save")
+        assert len(manager.list_bookmarks()) == 0
+
+    def test_bookmark_preserves_on_cleanup(self, manager, tmp_project):
+        """Bookmarked snapshots should survive cleanup."""
+        h1 = manager.capture("first", session_id="s1")
+        h2 = manager.capture("second", session_id="s1")
+
+        # Bookmark the first snapshot
+        manager.bookmark(h1, "important-state")
+
+        # Cleanup with 0 days — should remove non-bookmarked only
+        removed = manager.cleanup(max_age_days=0)
+        assert removed >= 1  # At least the non-bookmarked one
+
+        # The bookmarked snapshot should still exist
+        snaps = manager.list_snapshots()
+        assert len(snaps) == 1
+        assert snaps[0]["tree_hash"] == h1
+
+    def test_bookmark_nonexistent_hash(self, manager):
+        """Bookmarking a hash that doesn't exist should fail."""
+        success = manager.bookmark("0" * 40, "bad-bookmark")
+        assert not success
+
+    def test_restore_from_bookmark(self, manager, tmp_project):
+        """Can restore project to a bookmarked state."""
+        h = manager.capture("original", session_id="s1")
+        original_content = (tmp_project / "main.py").read_text()
+        manager.bookmark(h, "safe-point")
+
+        # Modify files
+        (tmp_project / "main.py").write_text("totally different\n")
+        manager.capture("after-changes", session_id="s1")
+
+        # Restore from bookmark
+        bm = manager.get_bookmark("safe-point")
+        success = manager.restore(bm["tree_hash"])
+        assert success
+        assert (tmp_project / "main.py").read_text() == original_content
+
+
+class TestSnapshotPreview:
+    def test_preview_restore(self, manager, tmp_project):
+        h1 = manager.capture("before", session_id="s1")
+        (tmp_project / "main.py").write_text("changed content\n")
+        manager.capture("after", session_id="s1")
+
+        # Preview restoring to h1
+        preview = manager.preview_restore(h1)
+        assert preview["summary"]["files_changed"] >= 1
+        # Should show main.py as changed
+        paths = [f["path"] for f in preview["files"]]
+        assert "main.py" in paths
+
+    def test_preview_restore_unchanged(self, manager, tmp_project):
+        """Preview of current state should show no changes."""
+        manager.capture("current", session_id="s1")
+        ok, current_tree = manager._run_git("rev-parse", "HEAD^{tree}")
+        assert ok
+
+        preview = manager.preview_restore(current_tree)
+        assert preview["summary"]["files_changed"] == 0
+
+
+class TestSnapshotHistory:
+    def test_get_history(self, manager, tmp_project):
+        manager.capture("snap-1", session_id="s1", phase="code", iteration=1)
+        (tmp_project / "main.py").write_text("v2\n")
+        manager.capture("snap-2", session_id="s1", phase="code", iteration=2)
+
+        history = manager.get_history()
+        # Should have at least 2 entries (+ init commit)
+        assert len(history) >= 2
+
+        # Most recent first
+        latest = history[0]
+        assert "commit_hash" in latest
+        assert "message" in latest
+
+    def test_history_shows_bookmarks(self, manager, tmp_project):
+        h = manager.capture("test", session_id="s1")
+        manager.bookmark(h, "my-bookmark")
+
+        history = manager.get_history()
+        # Find the bookmarked entry
+        bookmarked = [e for e in history if e.get("bookmark")]
+        assert len(bookmarked) >= 1
+        assert bookmarked[0]["bookmark"] == "my-bookmark"
+
+    def test_history_limit(self, manager, tmp_project):
+        for i in range(5):
+            (tmp_project / "main.py").write_text(f"version {i}\n")
+            manager.capture(f"snap-{i}", session_id="s1")
+
+        history = manager.get_history(limit=3)
+        assert len(history) <= 3
+
 
 
 class TestSnapshotGraceful:
@@ -143,6 +298,9 @@ class TestSnapshotGraceful:
         mgr = SnapshotManager(tmp_project)
         assert mgr.is_available()
         shadow = mgr._shadow_dir()
+
+        # Close connection before corrupting
+        mgr.close()
 
         # Corrupt the repo
         git_dir = shadow / ".git"
@@ -198,4 +356,12 @@ class TestSnapshotWSL2:
         status = mgr.get_status()
         assert status["available"] is True
         assert status["snapshot_count"] >= 1
+        assert status["bookmark_count"] == 0
         assert status["repo_size_mb"] >= 0
+
+    def test_status_with_bookmarks(self, tmp_project):
+        mgr = SnapshotManager(tmp_project)
+        h = mgr.capture("test-snap")
+        mgr.bookmark(h, "test-bm")
+        status = mgr.get_status()
+        assert status["bookmark_count"] == 1

@@ -1,20 +1,29 @@
 """
-Shadow Git Snapshot System
-============================
+Shadow Git Snapshot System (Enhanced)
+=====================================
 
 Separate git repository capturing full project state before/after each
-agent turn, enabling surgical per-file revert and rich diffs.
+agent turn with proper commit chain, SQLite-backed index, and named
+bookmarks for precision time-travel and full project restoration.
 
 The shadow repo lives at ~/.swarmweaver/snapshots/<project_hash>/ on the
 Linux filesystem (ext4) for fast git operations, while GIT_WORK_TREE points
 to the actual project directory (potentially NTFS on WSL2).
+
+Key features:
+- SQLite index (atomic, concurrent-safe, queryable) replaces JSON file
+- Proper git commit chain (linear history, parent links)
+- Named bookmarks (git tags + SQLite) for precision restore points
+- Preview before restore (see what would change)
+- Commit + tree hash dual tracking
 """
 
 import hashlib
-import json
 import os
 import shutil
+import sqlite3
 import subprocess
+import uuid
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -24,7 +33,7 @@ from typing import Optional
 @dataclass
 class SnapshotRecord:
     """Metadata for a single snapshot."""
-    hash: str                    # git tree SHA
+    hash: str                    # git tree SHA (primary external ID)
     label: str                   # "pre:code:3", "post:implement:5"
     timestamp: str
     session_id: str
@@ -32,6 +41,8 @@ class SnapshotRecord:
     iteration: int
     files_count: int
     worker_id: Optional[int] = None
+    id: str = ""                 # UUID (internal primary key)
+    commit_hash: str = ""        # git commit SHA (for history chain)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -72,6 +83,11 @@ class SnapshotManager:
     All git commands use GIT_DIR=<shadow_repo>/.git and
     GIT_WORK_TREE=<project_dir> to keep the shadow repo
     completely separate from the project's own git.
+
+    Snapshots are stored as proper git commits in a linear chain
+    with metadata indexed in SQLite for fast querying. Named
+    bookmarks protect important snapshots from cleanup and enable
+    precision time-travel.
     """
 
     def __init__(self, project_dir: Path, enabled: bool = True):
@@ -79,8 +95,8 @@ class SnapshotManager:
         self._enabled = enabled
         self._shadow_dir_path: Optional[Path] = None
         self._available: Optional[bool] = None
-        self._index_path: Optional[Path] = None
         self._warned = False
+        self._conn: Optional[sqlite3.Connection] = None
 
     def _project_hash(self) -> str:
         """Deterministic hash of the absolute project path."""
@@ -96,6 +112,10 @@ class SnapshotManager:
                 home / ".swarmweaver" / "snapshots" / self._project_hash()
             )
         return self._shadow_dir_path
+
+    def _db_path(self) -> Path:
+        """SQLite database path in the shadow repo directory."""
+        return self._shadow_dir() / "snapshots.db"
 
     def _git_env(self) -> dict:
         """Environment variables to redirect git to the shadow repo."""
@@ -126,6 +146,65 @@ class SnapshotManager:
         except Exception as e:
             return False, str(e)
 
+    # ------------------------------------------------------------------
+    # SQLite index
+    # ------------------------------------------------------------------
+
+    def _get_connection(self) -> sqlite3.Connection:
+        """Get or create SQLite connection with WAL mode."""
+        if self._conn is None:
+            db = self._db_path()
+            db.parent.mkdir(parents=True, exist_ok=True)
+            self._conn = sqlite3.connect(str(db), timeout=10)
+            self._conn.row_factory = sqlite3.Row
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA busy_timeout=5000")
+            self._conn.execute("PRAGMA foreign_keys=ON")
+            self._ensure_tables()
+        return self._conn
+
+    def _ensure_tables(self) -> None:
+        """Create SQLite tables if they don't exist."""
+        conn = self._conn
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS snapshots (
+                id TEXT PRIMARY KEY,
+                commit_hash TEXT NOT NULL,
+                tree_hash TEXT NOT NULL,
+                label TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                session_id TEXT DEFAULT '',
+                phase TEXT DEFAULT '',
+                iteration INTEGER DEFAULT 0,
+                files_count INTEGER DEFAULT 0,
+                worker_id INTEGER DEFAULT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS bookmarks (
+                name TEXT PRIMARY KEY,
+                snapshot_id TEXT NOT NULL,
+                commit_hash TEXT NOT NULL,
+                tree_hash TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (snapshot_id) REFERENCES snapshots(id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_snapshots_session
+                ON snapshots(session_id);
+            CREATE INDEX IF NOT EXISTS idx_snapshots_timestamp
+                ON snapshots(timestamp);
+            CREATE INDEX IF NOT EXISTS idx_snapshots_tree_hash
+                ON snapshots(tree_hash);
+            CREATE INDEX IF NOT EXISTS idx_snapshots_commit_hash
+                ON snapshots(commit_hash);
+        """)
+        conn.commit()
+
+    # ------------------------------------------------------------------
+    # Initialization
+    # ------------------------------------------------------------------
+
     def _init_shadow_repo(self) -> bool:
         """Initialize the shadow git repository."""
         shadow = self._shadow_dir()
@@ -147,7 +226,7 @@ class SnapshotManager:
         except Exception:
             return False
 
-        # Initialize bare-ish repo
+        # Initialize repo
         try:
             result = subprocess.run(
                 ["git", "init"],
@@ -176,7 +255,7 @@ class SnapshotManager:
         # Sync gitignore
         self._sync_gitignore()
 
-        # Initial empty commit
+        # Initial empty commit (establishes branch for commit chain)
         self._run_git("commit", "--allow-empty", "-m", "snapshot repo init")
 
         return True
@@ -222,6 +301,10 @@ class SnapshotManager:
         self._available = self._init_shadow_repo()
         return self._available
 
+    # ------------------------------------------------------------------
+    # Core capture
+    # ------------------------------------------------------------------
+
     def capture(
         self,
         label: str,
@@ -231,9 +314,11 @@ class SnapshotManager:
         worker_id: Optional[int] = None,
     ) -> Optional[str]:
         """
-        Capture current project state as a git tree hash.
+        Capture current project state as a git commit.
 
-        Returns the tree hash, or None on failure.
+        Creates a proper commit on the snapshot branch (if there are
+        changes), records metadata in SQLite. Returns the tree hash
+        (for backward compatibility), or None on failure.
         """
         if not self.is_available():
             return None
@@ -244,37 +329,51 @@ class SnapshotManager:
             if not ok:
                 return None
 
-            # Write tree (captures the index as a tree object)
-            ok, tree_hash = self._run_git("write-tree")
+            # Check if there are staged changes vs HEAD
+            has_changes_result, _ = self._run_git("diff", "--cached", "--quiet")
+            has_changes = not has_changes_result  # exit 1 = has changes
+
+            if has_changes:
+                ok, _ = self._run_git("commit", "-m", f"snapshot: {label}")
+                if not ok:
+                    # Fallback: allow-empty
+                    ok, _ = self._run_git(
+                        "commit", "--allow-empty", "-m", f"snapshot: {label}"
+                    )
+                    if not ok:
+                        return None
+
+            # Get current commit and tree hashes
+            ok, commit_hash = self._run_git("rev-parse", "HEAD")
+            if not ok or not commit_hash:
+                return None
+
+            ok, tree_hash = self._run_git("rev-parse", "HEAD^{tree}")
             if not ok or not tree_hash:
                 return None
 
-            # Create a ref for GC protection
-            safe_label = label.replace("/", "-").replace(" ", "_")[:50]
-            ref_name = f"refs/snapshots/{safe_label}"
-            # Create a commit pointing to this tree
-            ok, commit_hash = self._run_git(
-                "commit-tree", tree_hash, "-m", f"snapshot: {label}"
-            )
-            if ok and commit_hash:
-                self._run_git("update-ref", ref_name, commit_hash)
-
             # Count files in tree
-            ok, ls_output = self._run_git("ls-tree", "-r", "--name-only", tree_hash)
+            ok, ls_output = self._run_git(
+                "ls-tree", "-r", "--name-only", tree_hash
+            )
             files_count = len(ls_output.split("\n")) if ok and ls_output else 0
 
-            # Record in index
-            record = SnapshotRecord(
-                hash=tree_hash,
-                label=label,
-                timestamp=datetime.utcnow().isoformat() + "Z",
-                session_id=session_id,
-                phase=phase,
-                iteration=iteration,
-                files_count=files_count,
-                worker_id=worker_id,
+            # Record in SQLite
+            snap_id = str(uuid.uuid4())[:8]
+            timestamp = datetime.utcnow().isoformat() + "Z"
+
+            conn = self._get_connection()
+            conn.execute(
+                """INSERT INTO snapshots
+                   (id, commit_hash, tree_hash, label, timestamp,
+                    session_id, phase, iteration, files_count, worker_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    snap_id, commit_hash, tree_hash, label, timestamp,
+                    session_id, phase, iteration, files_count, worker_id,
+                ),
             )
-            self._append_to_index(record)
+            conn.commit()
 
             return tree_hash
 
@@ -284,9 +383,13 @@ class SnapshotManager:
                 self._warned = True
             return None
 
+    # ------------------------------------------------------------------
+    # Diff operations
+    # ------------------------------------------------------------------
+
     def diff(self, from_hash: str, to_hash: Optional[str] = None) -> dict:
         """
-        Diff between two tree hashes.
+        Diff between two tree/commit hashes.
 
         Returns {summary: {files_changed, insertions, deletions},
                  files: [{path, status, additions, deletions, diff}]}
@@ -307,7 +410,9 @@ class SnapshotManager:
             return result
 
         # Get name-status
-        ok, name_status = self._run_git("diff", "--name-status", from_hash, to_arg)
+        ok, name_status = self._run_git(
+            "diff", "--name-status", from_hash, to_arg
+        )
         status_map = {}
         if ok and name_status:
             for line in name_status.split("\n"):
@@ -368,7 +473,9 @@ class SnapshotManager:
         )
         return output if ok else ""
 
-    def changed_files(self, from_hash: str, to_hash: Optional[str] = None) -> list[str]:
+    def changed_files(
+        self, from_hash: str, to_hash: Optional[str] = None
+    ) -> list[str]:
         """Return list of changed file paths between two snapshots."""
         if not self.is_available():
             return []
@@ -380,8 +487,17 @@ class SnapshotManager:
             return []
         return [f for f in output.split("\n") if f.strip()]
 
+    # ------------------------------------------------------------------
+    # Restore operations
+    # ------------------------------------------------------------------
+
     def restore(self, tree_hash: str) -> bool:
-        """Full restore of project to a snapshot state."""
+        """
+        Full restore of project to a snapshot state.
+
+        Uses git read-tree + checkout-index for reliable cross-platform
+        restoration.
+        """
         if not self.is_available():
             return False
         try:
@@ -391,17 +507,17 @@ class SnapshotManager:
                 return False
 
             # Checkout files from index to working directory
-            ok, _ = self._run_git(
-                "checkout-index", "-a", "--force",
-                f"--prefix={str(self.project_dir)}/"
-            )
-            # Note: checkout-index with --prefix adds the prefix to paths,
-            # but since GIT_WORK_TREE is set, we use it without prefix
-            if not ok:
-                # Try without prefix (GIT_WORK_TREE handles it)
-                ok, _ = self._run_git("checkout-index", "-a", "--force")
+            ok, _ = self._run_git("checkout-index", "-a", "--force")
+            if ok:
+                return True
 
-            return ok
+            # Fallback: try with commit hash
+            commit = self._find_commit_for_tree(tree_hash)
+            if commit:
+                ok, _ = self._run_git("checkout", commit, "--", ".")
+                return ok
+
+            return False
         except Exception as e:
             print(f"[SnapshotManager] restore failed: {e}", flush=True)
             return False
@@ -436,41 +552,291 @@ class SnapshotManager:
 
         return result
 
+    def preview_restore(self, tree_hash: str) -> dict:
+        """
+        Preview what would change if restoring to this snapshot.
+
+        Shows the diff between current working state and the target
+        snapshot — what files would be modified, added, or removed.
+        """
+        if not self.is_available():
+            return {
+                "summary": {"files_changed": 0, "insertions": 0, "deletions": 0},
+                "files": [],
+            }
+
+        # Capture current state first (stage everything)
+        ok, _ = self._run_git("add", "-A")
+        if not ok:
+            return {
+                "summary": {"files_changed": 0, "insertions": 0, "deletions": 0},
+                "files": [],
+            }
+
+        ok, current_tree = self._run_git("write-tree")
+        if not ok:
+            return {
+                "summary": {"files_changed": 0, "insertions": 0, "deletions": 0},
+                "files": [],
+            }
+
+        # Diff: target → current (shows what would change)
+        return self.diff(current_tree, tree_hash)
+
+    # ------------------------------------------------------------------
+    # Bookmarks
+    # ------------------------------------------------------------------
+
+    def bookmark(
+        self, tree_hash: str, name: str, description: str = ""
+    ) -> bool:
+        """
+        Create a named bookmark for a snapshot.
+
+        Stored as a git tag (for GC protection) and in SQLite for
+        fast querying. Bookmarked snapshots are preserved during cleanup.
+        """
+        if not self.is_available():
+            return False
+
+        conn = self._get_connection()
+
+        # Find the snapshot record
+        row = conn.execute(
+            "SELECT id, commit_hash FROM snapshots WHERE tree_hash = ? "
+            "ORDER BY timestamp DESC LIMIT 1",
+            (tree_hash,),
+        ).fetchone()
+        if not row:
+            return False
+
+        snap_id = row["id"]
+        commit_hash = row["commit_hash"]
+
+        # Create git tag for GC protection
+        safe_name = name.replace(" ", "-").replace("/", "-")[:50]
+        tag_name = f"bookmark/{safe_name}"
+        ok, _ = self._run_git("tag", "-f", tag_name, commit_hash)
+        if not ok:
+            return False
+
+        # Record in SQLite
+        conn.execute(
+            """INSERT OR REPLACE INTO bookmarks
+               (name, snapshot_id, commit_hash, tree_hash, description, created_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (
+                name, snap_id, commit_hash, tree_hash, description,
+                datetime.utcnow().isoformat() + "Z",
+            ),
+        )
+        conn.commit()
+        return True
+
+    def list_bookmarks(self) -> list[dict]:
+        """List all bookmarks with snapshot metadata."""
+        if not self.is_available():
+            return []
+
+        conn = self._get_connection()
+        rows = conn.execute(
+            """SELECT b.name, b.description, b.created_at,
+                      b.commit_hash, b.tree_hash,
+                      s.label, s.session_id, s.phase,
+                      s.iteration, s.files_count,
+                      s.timestamp as snap_timestamp
+               FROM bookmarks b
+               LEFT JOIN snapshots s ON s.id = b.snapshot_id
+               ORDER BY b.created_at DESC"""
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def delete_bookmark(self, name: str) -> bool:
+        """Delete a bookmark (snapshot itself is preserved)."""
+        if not self.is_available():
+            return False
+
+        conn = self._get_connection()
+
+        # Delete git tag
+        safe_name = name.replace(" ", "-").replace("/", "-")[:50]
+        self._run_git("tag", "-d", f"bookmark/{safe_name}")
+
+        # Delete from SQLite
+        conn.execute("DELETE FROM bookmarks WHERE name = ?", (name,))
+        conn.commit()
+        return True
+
+    def get_bookmark(self, name: str) -> Optional[dict]:
+        """Get a single bookmark by name."""
+        if not self.is_available():
+            return None
+
+        conn = self._get_connection()
+        row = conn.execute(
+            """SELECT b.name, b.description, b.created_at,
+                      b.commit_hash, b.tree_hash,
+                      s.label, s.session_id, s.phase,
+                      s.iteration, s.files_count,
+                      s.timestamp as snap_timestamp
+               FROM bookmarks b
+               LEFT JOIN snapshots s ON s.id = b.snapshot_id
+               WHERE b.name = ?""",
+            (name,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    # ------------------------------------------------------------------
+    # Queries
+    # ------------------------------------------------------------------
+
+    def get_snapshot(self, tree_hash: str) -> Optional[dict]:
+        """Get a single snapshot by tree hash."""
+        if not self.is_available():
+            return None
+
+        conn = self._get_connection()
+        row = conn.execute(
+            "SELECT * FROM snapshots WHERE tree_hash = ? "
+            "ORDER BY timestamp DESC LIMIT 1",
+            (tree_hash,),
+        ).fetchone()
+        return dict(row) if row else None
+
     def list_snapshots(
         self, limit: int = 50, session_id: Optional[str] = None
     ) -> list[dict]:
-        """List snapshot records from the index file."""
-        records = self._read_index()
-
-        if session_id:
-            records = [r for r in records if r.get("session_id") == session_id]
-
-        # Most recent first
-        records.reverse()
-        return records[:limit]
-
-    def cleanup(self, max_age_days: int = 7) -> None:
-        """Delete old snapshot refs and run git gc."""
+        """List snapshot records from SQLite index."""
         if not self.is_available():
-            return
+            return []
 
-        cutoff = (datetime.utcnow() - timedelta(days=max_age_days)).isoformat() + "Z"
+        conn = self._get_connection()
+        if session_id:
+            rows = conn.execute(
+                """SELECT * FROM snapshots
+                   WHERE session_id = ?
+                   ORDER BY timestamp DESC LIMIT ?""",
+                (session_id, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM snapshots ORDER BY timestamp DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
 
-        # Read index, filter out old records
-        records = self._read_index()
-        kept = [r for r in records if r.get("timestamp", "") >= cutoff]
-        removed = [r for r in records if r.get("timestamp", "") < cutoff]
+        results = []
+        for row in rows:
+            d = dict(row)
+            # Include "hash" key for backward compatibility
+            d["hash"] = d["tree_hash"]
+            results.append(d)
 
-        # Delete refs for removed records
-        for record in removed:
-            safe_label = record.get("label", "").replace("/", "-").replace(" ", "_")[:50]
-            self._run_git("update-ref", "-d", f"refs/snapshots/{safe_label}")
+        return results
 
-        # Write filtered index
-        self._write_index(kept)
+    def get_history(self, limit: int = 50) -> list[dict]:
+        """
+        Get the git commit history of the snapshot branch.
+
+        Returns commits in reverse chronological order with
+        snapshot metadata joined from SQLite.
+        """
+        if not self.is_available():
+            return []
+
+        ok, log_output = self._run_git(
+            "log", f"--max-count={limit}", "--format=%H|%at|%s",
+        )
+        if not ok or not log_output:
+            return []
+
+        conn = self._get_connection()
+        history = []
+        for line in log_output.split("\n"):
+            if not line.strip():
+                continue
+            parts = line.split("|", 2)
+            if len(parts) < 3:
+                continue
+
+            commit_hash = parts[0]
+            unix_ts = parts[1]
+            subject = parts[2]
+
+            # Look up snapshot metadata
+            row = conn.execute(
+                "SELECT * FROM snapshots WHERE commit_hash = ? LIMIT 1",
+                (commit_hash,),
+            ).fetchone()
+
+            entry = {
+                "commit_hash": commit_hash,
+                "timestamp": (
+                    datetime.utcfromtimestamp(int(unix_ts)).isoformat() + "Z"
+                    if unix_ts.isdigit() else ""
+                ),
+                "message": subject,
+            }
+            if row:
+                entry.update({
+                    "tree_hash": row["tree_hash"],
+                    "label": row["label"],
+                    "session_id": row["session_id"],
+                    "phase": row["phase"],
+                    "iteration": row["iteration"],
+                    "files_count": row["files_count"],
+                })
+
+            # Check if bookmarked
+            bm = conn.execute(
+                "SELECT name FROM bookmarks WHERE commit_hash = ?",
+                (commit_hash,),
+            ).fetchone()
+            if bm:
+                entry["bookmark"] = bm["name"]
+
+            history.append(entry)
+
+        return history
+
+    # ------------------------------------------------------------------
+    # Cleanup
+    # ------------------------------------------------------------------
+
+    def cleanup(self, max_age_days: int = 7) -> int:
+        """Delete old snapshots (preserving bookmarked ones) and run git gc."""
+        if not self.is_available():
+            return 0
+
+        cutoff = (
+            datetime.utcnow() - timedelta(days=max_age_days)
+        ).isoformat() + "Z"
+
+        conn = self._get_connection()
+
+        # Get bookmarked snapshot IDs — these are preserved
+        bookmarked_ids = {
+            r["snapshot_id"]
+            for r in conn.execute("SELECT snapshot_id FROM bookmarks").fetchall()
+        }
+
+        rows = conn.execute(
+            "SELECT id FROM snapshots WHERE timestamp < ?",
+            (cutoff,),
+        ).fetchall()
+
+        removed = 0
+        for row in rows:
+            if row["id"] in bookmarked_ids:
+                continue
+            conn.execute("DELETE FROM snapshots WHERE id = ?", (row["id"],))
+            removed += 1
+
+        conn.commit()
 
         # Run git gc
         self._run_git("gc", "--prune=now", timeout=120)
+
+        return removed
 
     def get_status(self) -> dict:
         """Return snapshot system status info."""
@@ -482,12 +848,17 @@ class SnapshotManager:
             "shadow_dir": str(shadow),
             "project_hash": self._project_hash(),
             "snapshot_count": 0,
+            "bookmark_count": 0,
             "repo_size_mb": 0.0,
         }
 
         if available:
-            records = self._read_index()
-            status["snapshot_count"] = len(records)
+            conn = self._get_connection()
+            row = conn.execute("SELECT COUNT(*) as c FROM snapshots").fetchone()
+            status["snapshot_count"] = row["c"]
+
+            row = conn.execute("SELECT COUNT(*) as c FROM bookmarks").fetchone()
+            status["bookmark_count"] = row["c"]
 
             # Calculate repo size
             try:
@@ -502,33 +873,26 @@ class SnapshotManager:
 
         return status
 
+    def close(self) -> None:
+        """Close the SQLite connection."""
+        if self._conn:
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+            self._conn = None
+
     # ------------------------------------------------------------------
-    # Index management
+    # Internal helpers
     # ------------------------------------------------------------------
 
-    def _index_file(self) -> Path:
-        if self._index_path is None:
-            self._index_path = self._shadow_dir() / "snapshot_index.json"
-        return self._index_path
+    def _find_commit_for_tree(self, tree_hash: str) -> Optional[str]:
+        """Find the commit hash that produced a given tree hash."""
+        conn = self._get_connection()
+        row = conn.execute(
+            "SELECT commit_hash FROM snapshots WHERE tree_hash = ? "
+            "ORDER BY timestamp DESC LIMIT 1",
+            (tree_hash,),
+        ).fetchone()
+        return row["commit_hash"] if row else None
 
-    def _read_index(self) -> list[dict]:
-        idx_file = self._index_file()
-        if not idx_file.exists():
-            return []
-        try:
-            return json.loads(idx_file.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            return []
-
-    def _write_index(self, records: list[dict]) -> None:
-        try:
-            self._index_file().write_text(
-                json.dumps(records, indent=2), encoding="utf-8"
-            )
-        except Exception as e:
-            print(f"[SnapshotManager] write index failed: {e}", flush=True)
-
-    def _append_to_index(self, record: SnapshotRecord) -> None:
-        records = self._read_index()
-        records.append(record.to_dict())
-        self._write_index(records)

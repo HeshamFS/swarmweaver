@@ -105,21 +105,29 @@ Browse all persistent session records with:
 
 Data from `/api/sessions` endpoints. Real-time updates via WebSocket events: `session_db_created`, `session_db_updated`, `session_db_completed`.
 
-### Snapshot Timeline
+### Snapshot Panel
 
-The Checkpoints tab includes a shadow git snapshot timeline alongside file checkpoints:
+The Checkpoints tab includes a snapshot panel with two views (toggle between Timeline and Bookmarks):
 
+**Timeline view:**
 - **Snapshot pairs** — Pre/post snapshots per iteration, grouped by phase with color-coded badges
 - **Compare button** — Opens a diff drawer between pre and post snapshots of any iteration
+- **Bookmark button** — Pin a snapshot with a name and description; bookmarked snapshots show a star indicator
+- **Restore button** — Opens a preview modal showing what would change, then confirm to restore
 - **Diff drawer** — Slide-out panel with:
   - File list with additions/deletions stats and status indicators (A/M/D)
   - Expandable per-file unified diffs with syntax coloring
   - Multi-select checkboxes for batch file selection
   - Revert button to surgically restore selected files from a snapshot
-- **Status bar** — Shows snapshot count and shadow repo size in MB
-- **Auto-refresh** — Polls every 10 seconds while a session is running
 
-Data from `/api/snapshots` endpoints. Real-time updates via WebSocket `snapshot_captured` event.
+**Bookmarks view:**
+- **Bookmark list** — Named snapshots with descriptions, phase badges, tree hash, file counts
+- **Restore button** — Preview and confirm restore to a bookmarked state
+- **Remove button** — Delete a bookmark (the underlying snapshot is preserved)
+
+**Status bar** — Snapshot count, bookmark count, and shadow repo size in MB. Auto-refreshes every 10 seconds while running.
+
+Data from `/api/snapshots` endpoints (13 total). Real-time updates via WebSocket `snapshot_captured` event.
 
 ### Code Intel Tab (LSP)
 

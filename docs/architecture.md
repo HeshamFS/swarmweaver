@@ -364,10 +364,11 @@ SwarmWeaver includes two complementary systems for recording session history and
 
 `state/snapshots.py` provides a separate git repo at `~/.swarmweaver/snapshots/<project_hash>/`:
 
-- Captures full project state before/after each agent turn via `git write-tree`
-- Per-file revert, full restore, structured diffs between any two snapshots
+- Commit-based capture before/after each agent turn with proper linear chain and SQLite index (`snapshots.db`, WAL mode)
+- Named bookmarks for precision time-travel (git tags + SQLite records, preserved from cleanup)
+- Preview before restore, per-file revert, full restore, structured diffs between any two snapshots
 - Shadow repo on ext4 (not NTFS) for performance; graceful degradation on failure
-- 8 REST endpoints at `/api/snapshots/*` — list, diff, diff/file, files, revert, restore, cleanup, status
+- 13 REST endpoints at `/api/snapshots/*` — list, diff, diff/file, files, revert, restore, cleanup, status, bookmark CRUD, preview-restore, history
 - WebSocket event: `snapshot_captured`
 
 See [session-history.md](session-history.md) for full details.

@@ -184,7 +184,7 @@ Each target project gets a `.swarmweaver/` directory with session state and arti
 |------|---------|
 | `sessions.db` | Global session index — cross-project session metadata and analytics |
 | `expertise/expertise.db` | MELS cross-project expertise store |
-| `snapshots/<hash>/` | Shadow git snapshot repos — full project state before/after each agent turn |
+| `snapshots/<hash>/` | Shadow git snapshot repos — commit-based capture with SQLite index (`snapshots.db`), named bookmarks (git tags), full project state before/after each agent turn |
 
 Delete `.swarmweaver/` to reset a project; SwarmWeaver will recreate it on the next run.
 

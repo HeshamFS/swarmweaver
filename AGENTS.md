@@ -43,7 +43,7 @@
 - `core/merge_resolver.py` — 4-tier merge conflict resolution (clean → auto → AI → reimagine).
 - `core/merge_queue.py` — SQLite FIFO merge queue for swarm branch merges.
 - `state/sessions.py` — Persistent session DB: SessionStore + GlobalSessionIndex (SQLite WAL, per-turn messages, file changes, analytics).
-- `state/snapshots.py` — Shadow git snapshot system: capture/diff/restore/revert; shadow repo at `~/.swarmweaver/snapshots/`.
+- `state/snapshots.py` — Shadow git snapshot system: commit-based capture with SQLite index, named bookmarks, preview-restore, diff/revert; shadow repo at `~/.swarmweaver/snapshots/`.
 - `services/watchdog.py` — SwarmWatchdog: 9-state machine, 6-signal health evaluation, AI triage, circuit breaker, heartbeat protocol, persistent SQLite event log.
 - `frontend/` is a Next.js 15 app (`app/components`, `app/hooks`, `app/utils`).
 - `prompts/` holds mode and role templates; `templates/` holds starter specs; `tests/` holds Python regression tests.
@@ -66,7 +66,7 @@
 - Inter-agent mail system: typed payloads, context injection, attachments, dead letter queue, analytics (`swarmweaver mail` CLI)
 - User-configurable MCP servers (global + per-project) with built-in puppeteer and web search
 - Persistent session database (SQLite) with cross-project indexing, per-turn message recording, and analytics
-- Shadow git snapshots — full project state captured before/after each agent turn with per-file diff and surgical revert
+- Shadow git snapshots — commit-based capture before/after each agent turn with SQLite index, named bookmarks, preview-before-restore, per-file diff and surgical revert
 - Chat wizard flow with streaming (QA, architect, plan, security review)
 - 4-tier merge conflict resolution for swarm
 

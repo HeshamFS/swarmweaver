@@ -170,7 +170,7 @@ swarmweaver/                  # Project root (SwarmWeaver)
 │   ├── task_list.py              # Universal task list with dependencies and verification
 │   ├── session_state.py          # Session ID tracking and resumption
 │   ├── sessions.py               # Persistent session DB (SessionStore + GlobalSessionIndex, SQLite WAL)
-│   ├── snapshots.py              # Shadow git snapshot system (SnapshotManager, capture/diff/restore/revert)
+│   ├── snapshots.py              # Shadow git snapshot system (SnapshotManager, commit-based capture, SQLite index, bookmarks, preview-restore)
 │   ├── checkpoints.py            # File state checkpoints for rollback
 │   ├── session_checkpoint.py     # Session chain entries with snapshot hashes
 │   ├── process_registry.py       # Background process tracking (PID, port, type)
@@ -313,9 +313,9 @@ Decision logic in `main()` and server: `smart_swarm` → SmartSwarm; `parallel >
 | `services/lsp_intelligence.py` | Impact analysis, unused code detection, dependency graph, code health score |
 | `services/lsp_tools.py` | Worker MCP tools: `lsp_query` (13 operations), `lsp_diagnostics_summary` |
 | `state/sessions.py` | Persistent session DB: SessionStore (project-local) + GlobalSessionIndex (cross-project), SQLite WAL mode |
-| `state/snapshots.py` | Shadow git snapshot system: SnapshotManager with capture, diff, restore, per-file revert; shadow repo at `~/.swarmweaver/snapshots/<hash>/` |
+| `state/snapshots.py` | Shadow git snapshot system: commit-based SnapshotManager with SQLite index, named bookmarks, preview-restore, diff, revert; shadow repo at `~/.swarmweaver/snapshots/<hash>/` |
 | `api/routers/session_history.py` | 9 REST endpoints for session history (list, detail, messages, files, archive, delete, analytics, global, migrate) |
-| `api/routers/snapshots.py` | 8 REST endpoints for snapshots (list, diff, diff/file, files, revert, restore, cleanup, status) |
+| `api/routers/snapshots.py` | 13 REST endpoints for snapshots (list, diff, diff/file, files, revert, restore, cleanup, status, bookmark CRUD, preview-restore, history) |
 | `state/mail.py` | Inter-agent MailStore: typed payloads, context injection, attachments, dead letters, rate limiting, analytics |
 | `web_search_server.py` | MCP server that wraps Claude's web search tool for agent use |
 
@@ -440,7 +440,7 @@ Key endpoint categories:
 | Specs | `GET /api/specs`, `GET/POST /api/specs/{task_id}` |
 | Watchdog | `GET /api/watchdog/events`, `GET /api/watchdog/config`, `PUT /api/watchdog/config` |
 | Session History | `GET /api/sessions`, `GET /api/sessions/{id}`, `GET /api/sessions/{id}/messages`, `GET /api/sessions/{id}/files`, `POST /api/sessions/{id}/archive`, `DELETE /api/sessions/{id}`, `GET /api/sessions/analytics`, `GET /api/sessions/global`, `POST /api/sessions/migrate` |
-| Snapshots | `GET /api/snapshots`, `GET /api/snapshots/diff`, `GET /api/snapshots/diff/file`, `GET /api/snapshots/files`, `POST /api/snapshots/revert`, `POST /api/snapshots/restore`, `POST /api/snapshots/cleanup`, `GET /api/snapshots/status` |
+| Snapshots | `GET /api/snapshots`, `GET /api/snapshots/diff`, `GET /api/snapshots/diff/file`, `GET /api/snapshots/files`, `POST /api/snapshots/revert`, `POST /api/snapshots/restore`, `POST /api/snapshots/cleanup`, `GET /api/snapshots/status`, `POST /api/snapshots/bookmark`, `GET /api/snapshots/bookmarks`, `DELETE /api/snapshots/bookmark/{name}`, `GET /api/snapshots/preview-restore`, `GET /api/snapshots/history` |
 | Fleet | `GET /api/fleet/health` |
 | MCP | `GET/POST/PUT/DELETE /api/mcp/servers`, `POST /api/mcp/servers/{name}/enable\|disable\|test`, `POST /api/mcp/servers/validate`, `GET /api/mcp/export`, `POST /api/mcp/import` |
 | LSP | `GET /api/lsp/status`, `GET /api/lsp/diagnostics`, `POST /api/lsp/hover\|definition\|references\|symbols\|call-hierarchy`, `GET /api/lsp/servers`, `POST /api/lsp/servers/{id}/restart`, `GET/PUT /api/lsp/config`, `GET /api/lsp/impact-analysis`, `GET /api/lsp/code-health` |
@@ -713,7 +713,7 @@ The execution dashboard uses a **command-center layout** with resizable panels:
 | Audit | Built-in | `.swarmweaver/audit.log` |
 | Insights | `InsightsPanel.tsx` | `/api/insights` |
 | Agents | `AgentIdentityPanel.tsx` | `/api/agents` |
-| Checkpoints | `CheckpointPanel.tsx` + `SnapshotPanel.tsx` | `/api/checkpoints` + `/api/snapshots` |
+| Checkpoints | `CheckpointPanel.tsx` + `SnapshotPanel.tsx` | `/api/checkpoints` + `/api/snapshots` (13 endpoints incl. bookmarks) |
 | Sessions | `SessionBrowserPanel.tsx` | `/api/sessions` + WS `session_db_*` |
 | Profile | Built-in | Session profiling data |
 | Code Intel | `LSPPanel.tsx` | `/api/lsp/*` + WS `lsp.*` |
@@ -735,11 +735,15 @@ WebSocket events: `session_db_created`, `session_db_updated`, `session_db_comple
 
 `state/snapshots.py` provides a shadow git repository at `~/.swarmweaver/snapshots/<project_hash>/` (ext4, NOT NTFS):
 
-- **Pre/post capture** before and after each agent turn via `git write-tree`
+- **Commit-based capture** before and after each agent turn via `git commit` (proper linear chain)
+- **SQLite index** (`snapshots.db`, WAL mode) replaces JSON — atomic, concurrent-safe, queryable by session/phase/timestamp
+- **Named bookmarks** — pin important snapshots with git tags + SQLite records; preserved from cleanup
+- **Preview before restore** — see exactly what would change before committing
+- **Commit history** — browsable linear chain with snapshot metadata and bookmark annotations
 - **Structured diffs** between any two snapshots
 - **Per-file revert** and full restore
 - **Graceful degradation** — all operations fail silently, returning None/False
 
-Wired into `core/engine.py` with pre-turn and post-turn capture points. Snapshot hashes are stored in `ChainEntry` (`state/session_checkpoint.py`) and message records.
+Wired into `core/engine.py` with pre-turn and post-turn capture points. Snapshot hashes are stored in `ChainEntry` (`state/session_checkpoint.py`) and message records. 13 REST endpoints at `/api/snapshots/*`.
 
 WebSocket events: `snapshot_captured`

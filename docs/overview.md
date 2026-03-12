@@ -40,7 +40,7 @@ All modes share these capabilities:
 - **MELS expertise system** — Multi-Expertise Learning System with cross-project knowledge, real-time intra-session lesson synthesis, and token-budget-aware priming
 - **4-tier merge resolution** — Clean → auto → AI → reimagine for swarm conflicts
 - **Session persistence** — SQLite-backed session database with per-turn recording and cross-project indexing
-- **Shadow git snapshots** — Full project state captured before/after each agent turn with per-file diff and revert
+- **Shadow git snapshots** — Commit-based capture before/after each agent turn with SQLite index, named bookmarks, preview-before-restore, per-file diff and surgical revert
 - **Security allowlist** — Bash commands validated against an allowlist (~60+ commands)
 
 ## End-to-End Workflow

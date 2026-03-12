@@ -73,7 +73,9 @@ A separate git repository at `~/.swarmweaver/snapshots/<project_hash>/` captures
 - **Rich diffs** between any two snapshots
 - **Per-file revert** — surgically restore individual files from any snapshot
 - **Full restore** — restore entire project state to a previous snapshot
-- **Change visualization** — see exactly what each agent turn modified
+- **Named bookmarks** — pin important snapshots with names and descriptions, preserved from cleanup
+- **Preview before restore** — see exactly what would change before committing
+- **Commit history** — browse the linear snapshot chain with metadata
 
 The shadow repo is completely separate from the project's own git — it uses `GIT_DIR` and `GIT_WORK_TREE` environment variables to operate independently.
 
@@ -81,17 +83,31 @@ The shadow repo is completely separate from the project's own git — it uses `G
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| SnapshotManager | `state/snapshots.py` | Shadow git operations (capture, diff, restore, revert) |
-| Snapshots API | `api/routers/snapshots.py` | 8 REST endpoints |
-| SnapshotPanel | `frontend/app/components/SnapshotPanel.tsx` | Snapshot timeline + diff drawer + revert UI |
+| SnapshotManager | `state/snapshots.py` | Shadow git operations (capture, diff, restore, revert, bookmarks) |
+| Snapshots API | `api/routers/snapshots.py` | 13 REST endpoints |
+| SnapshotPanel | `frontend/app/components/SnapshotPanel.tsx` | Timeline/bookmarks views + diff drawer + restore preview |
 
 ### How It Works
 
-1. **Before each agent turn**: `SnapshotManager.capture()` runs `git add -A` + `git write-tree` in the shadow repo, recording a tree hash
-2. **After each agent turn**: Another capture records the post-turn state
-3. **On completion**: `SnapshotManager.cleanup()` removes old refs and runs garbage collection
+1. **Before each agent turn**: `SnapshotManager.capture()` runs `git add -A` + `git commit` in the shadow repo, creating a proper commit in a linear chain
+2. **After each agent turn**: Another capture records the post-turn state as a new commit
+3. **Metadata indexing**: Each capture is recorded in a SQLite database (`snapshots.db`, WAL mode) with tree hash, commit hash, label, session ID, phase, iteration, and file count
+4. **On completion**: `SnapshotManager.cleanup()` removes old records (preserving bookmarked snapshots) and runs `git gc`
 
-Snapshot metadata is stored in `snapshot_index.json` inside the shadow repo directory.
+The commit-based approach gives a proper linear history browsable with standard git tooling, while the SQLite index provides fast querying by session, phase, or timestamp.
+
+### Bookmarks
+
+Named bookmarks pin important snapshots for easy reference and precision time-travel:
+
+- `bookmark(tree_hash, name, description)` — creates a git tag (for GC protection) and SQLite record
+- Bookmarked snapshots are **preserved during cleanup** — they survive `cleanup(max_age_days=0)`
+- `list_bookmarks()`, `get_bookmark(name)`, `delete_bookmark(name)` for full CRUD
+- Typical use: bookmark before a risky refactor, after a successful milestone, or at any point you might want to return to
+
+### Preview Before Restore
+
+`preview_restore(tree_hash)` shows exactly what files would change if you restored to a snapshot — the diff between current working state and the target. The frontend renders this in a confirmation modal before executing the restore.
 
 ### WSL2/Windows Hardening
 
@@ -122,8 +138,13 @@ All snapshot operations fail silently:
 | GET | `/api/snapshots/files` | Changed files between snapshots |
 | POST | `/api/snapshots/revert` | Revert specific files from a snapshot |
 | POST | `/api/snapshots/restore` | Full restore to a snapshot |
-| POST | `/api/snapshots/cleanup` | Manual garbage collection |
-| GET | `/api/snapshots/status` | Snapshot system status (available, repo size, count) |
+| POST | `/api/snapshots/cleanup` | Manual garbage collection (preserves bookmarks) |
+| GET | `/api/snapshots/status` | Snapshot system status (available, repo size, counts) |
+| POST | `/api/snapshots/bookmark` | Create a named bookmark for a snapshot |
+| GET | `/api/snapshots/bookmarks` | List all bookmarks with snapshot metadata |
+| DELETE | `/api/snapshots/bookmark/{name}` | Delete a bookmark |
+| GET | `/api/snapshots/preview-restore` | Preview what restore would change |
+| GET | `/api/snapshots/history` | Git commit history with snapshot metadata |
 
 ### WebSocket Events
 
@@ -148,16 +169,25 @@ The **Sessions** tab in the Observability panel provides a full session browser:
 
 ### Snapshot Panel
 
-The **Checkpoints** tab in the Observability panel includes a snapshot timeline:
+The **Checkpoints** tab in the Observability panel includes a snapshot panel with two views:
 
-- **Snapshot timeline** — Paired pre/post snapshots per iteration, grouped by phase
+**Timeline view:**
+- **Snapshot pairs** — Pre/post snapshots per iteration, grouped by phase with color-coded badges
 - **Compare button** — Opens diff drawer between pre and post snapshots
+- **Bookmark button** — Pin a snapshot with a name and description (star icon)
+- **Restore button** — Preview what would change, then confirm to restore
 - **Diff drawer** — Slide-out panel with:
   - File list with additions/deletions stats
   - Expandable per-file unified diffs
   - Multi-select checkboxes for batch revert
   - Per-file and batch revert buttons
-- **Status bar** — Snapshot count and repository size
+
+**Bookmarks view:**
+- **Bookmark list** — Named snapshots with descriptions, phase badges, file counts
+- **Restore button** — Preview and restore to a bookmarked state
+- **Remove button** — Delete a bookmark (snapshot is preserved)
+
+**Status bar** — Snapshot count, bookmark count, and repository size in MB
 
 ---
 
@@ -167,7 +197,7 @@ The **Checkpoints** tab in the Observability panel includes a snapshot timeline:
 # Session database tests (21 tests)
 pytest tests/test_sessions.py -v
 
-# Snapshot system tests (17 tests)
+# Snapshot system tests (31 tests)
 pytest tests/test_snapshots.py -v
 ```
 

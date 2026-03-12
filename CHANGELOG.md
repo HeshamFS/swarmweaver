@@ -6,6 +6,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Enhanced
+- **Shadow git snapshots**: Replaced fragile JSON index with SQLite database (WAL mode). Captures now create proper git commits in a linear chain instead of orphan tree objects. Added named bookmarks (preserved from cleanup), preview-before-restore, and commit history browsing. 13 REST endpoints (was 8). Frontend adds Timeline/Bookmarks view toggle, bookmark modal, and restore preview confirmation.
+
 ## [1.0.0] - 2026-03-06
 
 Initial release of SwarmWeaver — an autonomous coding agent platform powered by the Claude Agent SDK.

@@ -22,7 +22,7 @@ Point it at a spec, a codebase, or a bug report — it works autonomously across
 - **Multi-agent swarm** — Static N workers or AI-orchestrated Smart Swarm with inter-agent mail
 - **Git worktree isolation** — Run in isolated branches; merge or discard on completion
 - **Session persistence** — SQLite-backed session database recording every session, agent turn, cost, and file change with cross-project indexing
-- **Shadow git snapshots** — Full project state captured before/after each agent turn with per-file diff and surgical revert
+- **Shadow git snapshots** — Commit-based capture before/after each agent turn with SQLite index, named bookmarks, preview-before-restore, per-file diff and surgical revert
 - **MELS expertise system** — Cross-project learning with real-time intra-session lesson synthesis
 - **Native LSP code intelligence** — 22 language servers with impact analysis and cross-worker diagnostics
 - **Approval gates & verification** — Human-in-the-loop review, self-healing test loops
