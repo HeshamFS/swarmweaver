@@ -1,6 +1,7 @@
 "use client";
 
 import { Command } from "cmdk";
+import { DialogTitle } from "@radix-ui/react-dialog";
 import { useState, useEffect, useCallback } from "react";
 
 /* ── Mode badge colors (mirrors TabBar.tsx) ── */
@@ -35,6 +36,11 @@ export function CommandPalette({
   /* ── Global keyboard shortcut: Ctrl+K / Cmd+K ── */
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "t") {
+        e.preventDefault();
+        onAction?.("new-tab");
+        return;
+      }
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
         setOpen((prev) => !prev);
@@ -42,7 +48,7 @@ export function CommandPalette({
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [onAction]);
 
   /* ── Helpers ── */
   const runAction = useCallback(
@@ -70,6 +76,8 @@ export function CommandPalette({
       overlayClassName="fixed inset-0 z-50 bg-black/60 backdrop-blur-md transition-all duration-300"
       contentClassName="fixed inset-0 z-50 flex items-start justify-center pt-[15vh] pb-[15vh] px-4"
     >
+      {/* Visually hidden title for screen reader accessibility (Radix DialogTitle requirement) */}
+      <DialogTitle className="sr-only">Command palette</DialogTitle>
       {/* Dialog content card */}
       <div className="w-full max-w-2xl rounded-2xl border border-[var(--color-border-subtle)] bg-[var(--color-surface-glass)] backdrop-blur-2xl shadow-[0_30px_100px_-20px_rgba(0,0,0,0.8)] overflow-hidden transition-all duration-300 transform scale-100 opacity-100">
         {/* ── Search input ── */}
@@ -234,6 +242,65 @@ export function CommandPalette({
               <span className="w-6 h-6 flex items-center justify-center rounded-md bg-[var(--color-surface-2)] text-[var(--color-text-secondary)] shadow-sm">&#9000;</span>
               <span className="flex-1 font-medium">Keyboard Shortcuts</span>
               <kbd className="text-[10px] px-2 py-0.5 rounded border border-[var(--color-border-subtle)] text-[var(--color-text-muted)]">?</kbd>
+            </Command.Item>
+          </Command.Group>
+
+          <Command.Separator className="h-px bg-[var(--color-border-subtle)] mx-2 my-2" />
+
+          {/* ── View & Tools ── */}
+          <Command.Group
+            heading="View & Tools"
+            className="[&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:text-[var(--color-text-muted)] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-widest [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-2 [&_[cmdk-group-heading]]:font-bold mb-2"
+          >
+            <Command.Item
+              value="show-plan"
+              onSelect={() => runAction("show-plan")}
+              className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-[var(--color-text-primary)] cursor-pointer transition-all duration-200 data-[selected=true]:bg-[var(--color-surface-3)] outline-none"
+            >
+              <span className="w-6 h-6 flex items-center justify-center rounded-md bg-[var(--color-surface-2)] text-[var(--color-info)] shadow-sm">&#128203;</span>
+              <span className="flex-1 font-medium">Show Execution Plan</span>
+              <kbd className="text-[10px] px-2 py-0.5 rounded border border-[var(--color-border-subtle)] text-[var(--color-text-muted)]">Ctrl+Shift+P</kbd>
+            </Command.Item>
+            <Command.Item
+              value="toggle-costs"
+              onSelect={() => runAction("toggle-costs")}
+              className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-[var(--color-text-primary)] cursor-pointer transition-all duration-200 data-[selected=true]:bg-[var(--color-surface-3)] outline-none"
+            >
+              <span className="w-6 h-6 flex items-center justify-center rounded-md bg-[var(--color-surface-2)] text-[var(--color-success)] shadow-sm">&#36;</span>
+              <span className="flex-1 font-medium">View Cost Analysis</span>
+            </Command.Item>
+            <Command.Item
+              value="output-style-verbose"
+              onSelect={() => runAction("output-style:verbose")}
+              className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-[var(--color-text-primary)] cursor-pointer transition-all duration-200 data-[selected=true]:bg-[var(--color-surface-3)] outline-none"
+            >
+              <span className="w-6 h-6 flex items-center justify-center rounded-md bg-[var(--color-surface-2)] text-[var(--color-text-secondary)] shadow-sm">&#128221;</span>
+              <span className="flex-1 font-medium">Output: Verbose</span>
+            </Command.Item>
+            <Command.Item
+              value="output-style-concise"
+              onSelect={() => runAction("output-style:concise")}
+              className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-[var(--color-text-primary)] cursor-pointer transition-all duration-200 data-[selected=true]:bg-[var(--color-surface-3)] outline-none"
+            >
+              <span className="w-6 h-6 flex items-center justify-center rounded-md bg-[var(--color-surface-2)] text-[var(--color-text-secondary)] shadow-sm">&#128221;</span>
+              <span className="flex-1 font-medium">Output: Concise</span>
+            </Command.Item>
+            <Command.Item
+              value="new-tab"
+              onSelect={() => runAction("new-tab")}
+              className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-[var(--color-text-primary)] cursor-pointer transition-all duration-200 data-[selected=true]:bg-[var(--color-surface-3)] outline-none"
+            >
+              <span className="w-6 h-6 flex items-center justify-center rounded-md bg-[var(--color-surface-2)] text-[var(--color-text-secondary)] shadow-sm">&#43;</span>
+              <span className="flex-1 font-medium">New Tab</span>
+              <kbd className="text-[10px] px-2 py-0.5 rounded border border-[var(--color-border-subtle)] text-[var(--color-text-muted)]">Ctrl+T</kbd>
+            </Command.Item>
+            <Command.Item
+              value="show-permissions"
+              onSelect={() => runAction("show-permissions")}
+              className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-[var(--color-text-primary)] cursor-pointer transition-all duration-200 data-[selected=true]:bg-[var(--color-surface-3)] outline-none"
+            >
+              <span className="w-6 h-6 flex items-center justify-center rounded-md bg-[var(--color-surface-2)] text-[var(--color-warning)] shadow-sm">&#128274;</span>
+              <span className="flex-1 font-medium">Tool Permissions</span>
             </Command.Item>
           </Command.Group>
         </Command.List>

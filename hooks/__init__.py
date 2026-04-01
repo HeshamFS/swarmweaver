@@ -4,6 +4,10 @@ Hook definitions: security, management, marathon, audit.
 Re-exports all hooks from main_hooks.py for backward-compatible imports
 like `from hooks import bash_security_hook`.
 """
+from hooks.security import (
+    tool_permissions_hook,
+    set_permissions_project_dir,
+)
 from hooks.main_hooks import (
     # Security hook (re-exported from hooks.security)
     bash_security_hook,

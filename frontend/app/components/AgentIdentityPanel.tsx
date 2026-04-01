@@ -407,7 +407,9 @@ export function AgentIdentityPanel({
   const domainCorrelation = useMemo(() => {
     if (!projExpertise || agents.length === 0) return null;
     const correlation: { domain: string; count: number; avgSuccess: number; agentCount: number }[] = [];
-    for (const domain of projExpertise.domains) {
+    for (const rawDomain of projExpertise.domains) {
+      // domains may be strings or objects with a .name property
+      const domain: string = typeof rawDomain === "string" ? rawDomain : (rawDomain as { name?: string })?.name || String(rawDomain);
       const matchingAgents = agents.filter(
         (a) => a.expertise_domains?.includes(domain) || a.domains_touched?.[domain] != null
       );

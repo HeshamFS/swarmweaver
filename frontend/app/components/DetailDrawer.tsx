@@ -23,6 +23,14 @@ import { SessionChainPanel } from "./SessionChainPanel";
 import { RunHistoryPanel } from "./RunHistoryPanel";
 import { SpecPanel } from "./SpecPanel";
 import { TaskGroupPanel } from "./TaskGroupPanel";
+import { InsightsPanel } from "./InsightsPanel";
+import { AgentIdentityPanel } from "./AgentIdentityPanel";
+import { AuditView } from "./AuditView";
+import type { EventStoreResponse } from "./AuditView";
+import { ProfileView } from "./ProfileView";
+import type { CodebaseProfile } from "./ProfileView";
+import { PermissionsPanel } from "./PermissionsPanel";
+import { PlanView } from "./PlanView";
 
 export interface DetailDrawerProps {
   isOpen: boolean;
@@ -39,6 +47,14 @@ export interface DetailDrawerProps {
   activeSection?: string | null;
   /** When set, Observe tab can scope costs/timeline to this worker (Phase 2: API support) */
   selectedWorkerId?: number | null;
+  /** Agent execution status (idle, running, completed, error) */
+  status?: import("../hooks/useSwarmWeaver").AgentStatus;
+  /** Plan mode: pending run config waiting for plan approval */
+  pendingPlanConfig?: import("../hooks/useSwarmWeaver").RunConfig | null;
+  /** Plan mode: called when user approves the plan */
+  onPlanApprove?: () => void;
+  /** Plan mode: called when user rejects the plan */
+  onPlanReject?: () => void;
 }
 
 /* ---- Status helpers ---- */
@@ -126,11 +142,11 @@ function useApiPoll(endpoint: string, projectPath: string, isOpen: boolean, inte
 
 /* ---- Panel width constants ---- */
 const MIN_WIDTH = 380;
-const DEFAULT_WIDTH = 520;
+const DEFAULT_WIDTH = 900;
 const MAX_WIDTH = 900;
 
 /* ---- Tab type ---- */
-type DrawerTab = "tasks" | "monitor" | "costs" | "code" | "sessions" | "expertise" | "swarm";
+type DrawerTab = "tasks" | "monitor" | "costs" | "code" | "sessions" | "expertise" | "swarm" | "insights" | "agents" | "audit" | "permissions" | "plan";
 
 /* ---- Main Component ---- */
 
@@ -148,6 +164,10 @@ export function DetailDrawer({
   approvalRequest,
   activeSection,
   selectedWorkerId,
+  status,
+  pendingPlanConfig,
+  onPlanApprove,
+  onPlanReject,
 }: DetailDrawerProps) {
   const drawerRef = useRef<HTMLDivElement>(null);
 
@@ -191,6 +211,7 @@ export function DetailDrawer({
   const isMonitorTab = isOpen && activeDrawerTab === "monitor";
   const isCodeTab = isOpen && activeDrawerTab === "code";
   const isSessionsTab = isOpen && activeDrawerTab === "sessions";
+  const isAuditTab = isOpen && activeDrawerTab === "audit";
 
   // Budget is shared (status strip uses it) — poll always when open
   const { data: budgetData } = useApiPoll("budget", projectPath, isOpen, 15000);
@@ -206,11 +227,15 @@ export function DetailDrawer({
   const { data: lspStatusData } = useApiPoll("lsp/status", projectPath, isCodeTab, 10000);
   const { data: lspDiagData } = useApiPoll("lsp/diagnostics", projectPath, isCodeTab, 10000);
   const { data: lspHealthData } = useApiPoll("lsp/code-health", projectPath, isCodeTab, 10000);
-  const { data: lspStatsData } = useApiPoll("lsp/stats", projectPath, isCodeTab, 5000);
+  const { data: lspStatsData } = useApiPoll("lsp/stats", projectPath, isCodeTab, 10000);
 
   // Sessions tab polls
   const { data: sessionChainData } = useApiPoll("session/chain", projectPath, isSessionsTab, 15000);
   const { data: reflectionsData } = useApiPoll("reflections", projectPath, isSessionsTab, 20000);
+
+  // Audit tab polls
+  const { data: eventStoreApiData } = useApiPoll("events", projectPath, isAuditTab, 10000);
+  const { data: toolStatsData } = useApiPoll("events/tool-stats", projectPath, isAuditTab, 10000);
 
   // Worktree diff (only when worktree exists)
   const [worktreeDiffData, setWorktreeDiffData] = useState<{ diff: string; status?: { files_changed?: number } } | null>(null);
@@ -240,11 +265,13 @@ export function DetailDrawer({
     spec: "tasks",
     timeline: "monitor",
     errors: "monitor",
-    agents: "monitor",
+    agents: "agents",
     processes: "monitor",
-    audit: "monitor",
+    audit: "audit",
     profile: "monitor",
-    insights: "monitor",
+    insights: "insights",
+    permissions: "permissions",
+    plan: "plan",
     costs: "costs",
     budget: "costs",
     "run-history": "costs",
@@ -336,12 +363,18 @@ export function DetailDrawer({
   }, [projectPath]);
 
   useEffect(() => {
-    if (isExpertiseTab) {
+    if (!isExpertiseTab) return;
+    fetchExpertiseRecords();
+    fetchExpertiseDomains();
+    fetchExpertiseAnalytics();
+    fetchExpertiseLessons();
+    const interval = setInterval(() => {
       fetchExpertiseRecords();
       fetchExpertiseDomains();
       fetchExpertiseAnalytics();
       fetchExpertiseLessons();
-    }
+    }, 15000);
+    return () => clearInterval(interval);
   }, [isExpertiseTab, fetchExpertiseRecords, fetchExpertiseDomains, fetchExpertiseAnalytics, fetchExpertiseLessons]);
 
   // Re-fetch lessons when a new expertise WS event arrives (so API data stays current)
@@ -388,26 +421,46 @@ export function DetailDrawer({
   const doneTasks = useMemo(() => taskList.filter((t) => t.status === "done" || t.status === "completed" || t.status === "verified"), [taskList]);
   const failedTasks = useMemo(() => taskList.filter((t) => t.status === "failed" || t.status === "failed_verification"), [taskList]);
 
-  // Merge file touches from WS sessionStats + REST API + audit-timeline + worktree diff
+  // File touches: priority chain picks ONE source to avoid double-counting
+  // Priority 1: sessionStats.file_touches (real-time WS)
+  // Priority 2: sessionStatsApi.file_touches (REST fallback)
+  // Priority 3: auditTimelineData (event-based)
+  // Priority 4: worktreeDiffData (git diff)
   const fileTouches = useMemo(() => {
-    const touches: Record<string, number> = { ...(sessionStats?.file_touches ?? sessionStatsApi?.file_touches ?? {}) };
+    // Priority 1: real-time WS data
+    if (sessionStats?.file_touches && Object.keys(sessionStats.file_touches).length > 0) {
+      return Object.entries(sessionStats.file_touches).sort(([, a], [, b]) => b - a);
+    }
+    // Priority 2: REST API fallback
+    if (sessionStatsApi?.file_touches && Object.keys(sessionStatsApi.file_touches as Record<string, number>).length > 0) {
+      return Object.entries(sessionStatsApi.file_touches as Record<string, number>).sort(([, a], [, b]) => b - a);
+    }
+    // Priority 3: audit timeline events
     const entries = (auditTimelineData?.entries ?? []) as ApiData[];
-    for (const entry of entries) {
-      let fp = "";
-      const ti = entry.tool_input ?? entry.input;
-      if (ti && typeof ti === "object" && !Array.isArray(ti)) {
-        const tio = ti as ApiData;
-        fp = asStr(tio.file_path ?? tio.path ?? tio.filename);
-      } else if (typeof entry.tool_input_preview === "string") {
-        const m = entry.tool_input_preview.match(/(?:file_path|path|filename)["']?\s*[:=]\s*["']?([^"'\s,}]+)/);
-        if (m) fp = m[1].trim();
+    if (entries.length > 0) {
+      const touches: Record<string, number> = {};
+      for (const entry of entries) {
+        let fp = "";
+        const ti = entry.tool_input ?? entry.input;
+        if (ti && typeof ti === "object" && !Array.isArray(ti)) {
+          const tio = ti as ApiData;
+          fp = asStr(tio.file_path ?? tio.path ?? tio.filename);
+        } else if (typeof entry.tool_input_preview === "string") {
+          const m = entry.tool_input_preview.match(/(?:file_path|path|filename)["']?\s*[:=]\s*["']?([^"'\s,}]+)/);
+          if (m) fp = m[1].trim();
+        }
+        if (fp && asStr(entry.tool_name ?? entry.tool) in { Write: 1, Edit: 1, Read: 1, NotebookEdit: 1 }) {
+          touches[fp] = (touches[fp] ?? 0) + 1;
+        }
       }
-      if (fp && asStr(entry.tool_name ?? entry.tool) in { Write: 1, Edit: 1, Read: 1, NotebookEdit: 1 }) {
-        touches[fp] = (touches[fp] ?? 0) + 1;
+      if (Object.keys(touches).length > 0) {
+        return Object.entries(touches).sort(([, a], [, b]) => b - a);
       }
     }
+    // Priority 4: worktree diff
     const diff = worktreeDiffData?.diff ?? "";
     if (diff) {
+      const touches: Record<string, number> = {};
       const seen = new Set<string>();
       for (const line of diff.split("\n")) {
         const m = line.match(/^diff --git a\/(.+?) b\/\1$/);
@@ -419,8 +472,11 @@ export function DetailDrawer({
           }
         }
       }
+      if (Object.keys(touches).length > 0) {
+        return Object.entries(touches).sort(([, a], [, b]) => b - a);
+      }
     }
-    return Object.entries(touches).sort(([, a], [, b]) => b - a);
+    return [];
   }, [sessionStats, sessionStatsApi, auditTimelineData, worktreeDiffData]);
 
   // In native mode, tool_start events are in events[]. Count them directly.
@@ -539,6 +595,11 @@ export function DetailDrawer({
     nativeToolCallCount > 0 ? nativeToolCallCount :
     asNum(insightsData?.total_tool_calls);
 
+  const dataSource = (sessionStats?.tool_call_count ?? 0) > 0 ? "live" :
+    asNum(sessionStatsApi?.tool_call_count) > 0 ? "api" :
+    nativeToolCallCount > 0 ? "events" :
+    asNum(insightsData?.total_tool_calls) > 0 ? "insights" : "none";
+
   const mergedErrorCount: number =
     (sessionStats?.error_count ?? 0) > 0 ? sessionStats!.error_count :
     asNum(sessionStatsApi?.error_count) > 0 ? asNum(sessionStatsApi?.error_count) :
@@ -630,6 +691,11 @@ export function DetailDrawer({
     { key: "code", label: "Code", icon: "\u2726" },
     { key: "sessions", label: "Sessions", icon: "\u25A3" },
     { key: "expertise", label: "Expertise", icon: "\u2261" },
+    { key: "insights", label: "Insights", icon: "\u25C8" },
+    { key: "agents", label: "Agents", icon: "\u2726" },
+    { key: "audit", label: "Audit", icon: "\u25C7" },
+    { key: "permissions", label: "Perms", icon: "\u25A0" },
+    { key: "plan", label: "Plan", icon: "\u25B6" },
     ...(isSwarmMode ? [{ key: "swarm" as DrawerTab, label: "Swarm", icon: "\u2302" }] : []),
   ];
 
@@ -938,7 +1004,7 @@ export function DetailDrawer({
               </DrawerSection>
 
               <DrawerSection
-                title="Profile"
+                title={`Profile (${dataSource})`}
                 icon={<span className="text-xs font-mono">{"\u2318"}</span>}
                 forceOpen={activeSection === "profile" ? true : undefined}
               >
@@ -988,49 +1054,14 @@ export function DetailDrawer({
 
               <DrawerSection
                 title="Insights"
-                icon={<span className="text-xs font-mono">{"\u2605"}</span>}
-                forceOpen={activeSection === "insights" ? true : undefined}
+                icon={<span className="text-xs font-mono">{"\u25C8"}</span>}
               >
-                {(topTools?.length ?? 0) > 0 || (hotFiles?.length ?? 0) > 0 ? (
-                  <div className="space-y-2">
-                    {(topTools?.length ?? 0) > 0 && (
-                      <div>
-                        <span className="text-[10px] font-mono text-[#555] uppercase tracking-wider block mb-1">Top Tools</span>
-                        <div className="space-y-0.5">
-                          {(topTools ?? []).slice(0, 8).map((entry, i) => {
-                            const name = Array.isArray(entry) ? entry[0] : (entry?.name ?? (entry as ApiData)?.tool ?? "");
-                            const count = Array.isArray(entry) ? entry[1] : (entry?.count ?? (entry as ApiData)?.touches ?? 0);
-                            return (
-                              <div key={name || i} className="flex justify-between text-[10px] font-mono">
-                                <span className="text-[#888] truncate">{name}</span>
-                                <span className="text-[var(--color-accent)] shrink-0 ml-2">{String(count)}</span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-                    {(hotFiles?.length ?? 0) > 0 && (
-                      <div className="pt-2 border-t border-[#222]">
-                        <span className="text-[10px] font-mono text-[#555] uppercase tracking-wider block mb-1">Hot Files</span>
-                        <div className="space-y-0.5 max-h-32 overflow-y-auto tui-scrollbar">
-                          {(hotFiles ?? []).slice(0, 8).map((entry, i) => {
-                            const file = Array.isArray(entry) ? entry[0] : (entry?.path ?? (entry as ApiData)?.name ?? "");
-                            const count = Array.isArray(entry) ? entry[1] : (entry?.edit_count ?? (entry as ApiData)?.touches ?? (entry as ApiData)?.count ?? 0);
-                            return (
-                              <div key={(file as string) || i} className="flex justify-between text-[10px] font-mono gap-2">
-                                <span className="text-[#888] truncate">{file as string}</span>
-                                <span className="text-[var(--color-accent)] shrink-0">{String(count)}</span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <p className="text-xs font-mono text-[#555]">No insights yet</p>
-                )}
+                <button
+                  onClick={() => setActiveDrawerTab("insights")}
+                  className="text-[10px] font-mono text-[var(--color-accent)] hover:underline"
+                >
+                  Open full Insights panel {"\u2192"}
+                </button>
               </DrawerSection>
               </>
               )}
@@ -1049,7 +1080,7 @@ export function DetailDrawer({
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-mono text-[#555]">Total Cost</span>
                       <span className="text-sm font-mono font-bold text-[#E0E0E0]">
-                        ${Number(budgetData?.estimated_cost_usd ?? 0).toFixed(4)}
+                        {String(budgetData?.cost_display || `$${Number(budgetData?.estimated_cost_usd ?? 0).toFixed(4)}`)}
                       </span>
                     </div>
                     {asNum(budgetData.budget_limit_usd) > 0 && (
@@ -1068,6 +1099,22 @@ export function DetailDrawer({
                         </span>
                       </div>
                     )}
+                    {asNum(budgetData.total_cache_read_tokens) > 0 && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-mono text-[#555]">Cache (read/write)</span>
+                        <span className="text-xs font-mono text-[#3B82F6]">
+                          {asNum(budgetData.total_cache_read_tokens).toLocaleString()} / {asNum(budgetData.total_cache_write_tokens).toLocaleString()}
+                        </span>
+                      </div>
+                    )}
+                    {asNum(budgetData.cache_efficiency) > 0 && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-mono text-[#555]">Cache Efficiency</span>
+                        <span className="text-xs font-mono text-[#10B981]">
+                          {(asNum(budgetData.cache_efficiency) * 100).toFixed(1)}%
+                        </span>
+                      </div>
+                    )}
                     {asNum(budgetData.session_count) > 0 && (
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-mono text-[#555]">Sessions</span>
@@ -1078,6 +1125,22 @@ export function DetailDrawer({
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-mono text-[#555]">Runtime</span>
                         <span className="text-xs font-mono text-[#888]">{asNum(budgetData.elapsed_hours).toFixed(1)}h</span>
+                      </div>
+                    )}
+                    {(asNum(budgetData.total_lines_added) > 0 || asNum(budgetData.total_lines_removed) > 0) && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-mono text-[#555]">Code Changes</span>
+                        <span className="text-xs font-mono">
+                          <span className="text-[#10B981]">+{asNum(budgetData.total_lines_added).toLocaleString()}</span>
+                          {" / "}
+                          <span className="text-[#EF4444]">-{asNum(budgetData.total_lines_removed).toLocaleString()}</span>
+                        </span>
+                      </div>
+                    )}
+                    {asNum(budgetData.web_search_count) > 0 && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-mono text-[#555]">Web Searches</span>
+                        <span className="text-xs font-mono text-[#888]">{asNum(budgetData.web_search_count)}</span>
                       </div>
                     )}
                   </div>
@@ -1092,7 +1155,7 @@ export function DetailDrawer({
                 forceOpen={activeSection === "costs" ? true : undefined}
               >
                 <div className="min-h-[200px]">
-                  <CostPanel projectDir={projectPath} />
+                  <CostPanel projectDir={projectPath} liveBudget={budgetData} />
                 </div>
               </DrawerSection>
 
@@ -1294,7 +1357,12 @@ export function DetailDrawer({
               >
                 {asArr(reflectionsData?.reflections).length > 0 ? (
                   <div className="space-y-2 max-h-64 overflow-y-auto tui-scrollbar">
-                    {asArr(reflectionsData?.reflections).slice(-10).map((r: ApiData, i: number) => {
+                    {asArr(reflectionsData?.reflections).length > 30 && (
+                      <div className="text-[9px] font-mono text-[#444] mb-1">
+                        Showing last 30 of {asArr(reflectionsData?.reflections).length}
+                      </div>
+                    )}
+                    {asArr(reflectionsData?.reflections).slice(-30).map((r: ApiData, i: number) => {
                       const rContent = asStr(r.content ?? r.text);
                       return (
                       <div key={i} className="p-2 bg-[#121212] border border-[#222] border-l-2 border-l-[var(--color-accent)]/50">
@@ -1615,6 +1683,49 @@ export function DetailDrawer({
                 )}
               </DrawerSection>
               </>
+              )}
+
+              {/* ═══════════════════ Insights tab ═══════════════════ */}
+              {activeDrawerTab === "insights" && projectPath && (
+                <div className="p-0 h-full">
+                  <InsightsPanel projectDir={projectPath} />
+                </div>
+              )}
+
+              {/* ═══════════════════ Agents tab ═══════════════════ */}
+              {activeDrawerTab === "agents" && projectPath && (
+                <div className="p-0 h-full">
+                  <AgentIdentityPanel projectDir={projectPath} status={status} />
+                </div>
+              )}
+
+              {/* ═══════════════════ Audit tab ═══════════════════ */}
+              {activeDrawerTab === "audit" && (
+                <div className="p-0 h-full">
+                  <AuditView loading={false} events={events} eventStoreData={eventStoreApiData as EventStoreResponse | null} toolStats={Array.isArray(toolStatsData?.tool_stats) ? toolStatsData.tool_stats : Array.isArray(toolStatsData) ? toolStatsData : []} />
+                </div>
+              )}
+
+              {/* ═══════════════════ Permissions tab ═══════════════════ */}
+              {activeDrawerTab === "permissions" && projectPath && (
+                <div className="p-0 h-full">
+                  <PermissionsPanel projectDir={projectPath} />
+                </div>
+              )}
+
+              {/* ═══════════════════ Plan tab ═══════════════════ */}
+              {activeDrawerTab === "plan" && (projectPath || pendingPlanConfig?.project_dir) && (
+                <div className="p-0 h-full">
+                  <PlanView
+                    projectDir={projectPath || pendingPlanConfig?.project_dir || ""}
+                    mode={pendingPlanConfig?.mode || "feature"}
+                    taskInput={pendingPlanConfig?.task_input || ""}
+                    model={pendingPlanConfig?.model || "claude-sonnet-4-6"}
+                    onApprove={onPlanApprove || (() => {})}
+                    onReject={onPlanReject || (() => {})}
+                    onModify={() => {}}
+                  />
+                </div>
               )}
 
               {/* ═══════════════════ Swarm tab (conditional) ═══════════════════ */}

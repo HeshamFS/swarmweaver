@@ -7,6 +7,7 @@ import SessionTab from "./components/SessionTab";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ConfirmModal } from "./components/ConfirmModal";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { CommandPalette } from "./components/CommandPalette";
 import { useGlobalSettings } from "./hooks/useGlobalSettings";
 
 export default function Home() {
@@ -85,6 +86,37 @@ export default function Home() {
     }
   }, [globalSettings.theme]);
 
+  /* ── Command palette action handler ── */
+
+  const handleCommandPaletteAction = useCallback(
+    (action: string) => {
+      if (action === "new-tab") {
+        handleNewTab();
+      } else if (action.startsWith("output-style:")) {
+        const style = action.replace("output-style:", "");
+        updateSettings({ outputStyle: style });
+      } else if (
+        action === "show-plan" ||
+        action === "toggle-costs" ||
+        action === "show-permissions"
+      ) {
+        // Map command palette actions to drawer section names
+        const sectionMap: Record<string, string> = {
+          "show-plan": "plan",
+          "toggle-costs": "costs",
+          "show-permissions": "permissions",
+        };
+        const section = sectionMap[action];
+        if (section) {
+          window.dispatchEvent(
+            new CustomEvent("swarmweaver:open-drawer", { detail: { section } })
+          );
+        }
+      }
+    },
+    [handleNewTab, updateSettings]
+  );
+
   /* ── Keyboard shortcut: Ctrl+N for new session ── */
 
   useEffect(() => {
@@ -158,6 +190,8 @@ export default function Home() {
         }}
         onCancel={() => setCloseConfirm(null)}
       />
+
+      <CommandPalette onAction={handleCommandPaletteAction} />
     </div>
   );
 }

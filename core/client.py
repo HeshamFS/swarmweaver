@@ -45,6 +45,8 @@ from hooks import (
     set_project_dir,
     set_cleanup_on_stop,
     set_mail_store,
+    tool_permissions_hook,
+    set_permissions_project_dir,
     lsp_post_edit_hook,
     lsp_diagnostic_watchdog_signal,
 )
@@ -170,11 +172,12 @@ def create_client(
         set_audit_log_path(paths.audit_log)
     set_transcript_archive_path(paths.transcript_archive)
     set_project_dir(project_dir)
+    set_permissions_project_dir(project_dir)
     set_cleanup_on_stop(True)  # Cleanup background processes on shutdown
-    
+
     # Configure marathon hooks for long-running sessions
     configure_marathon(project_dir, commit_interval_minutes=15)
-    
+
     # Initialize process registry and cleanup dead processes from previous sessions
     try:
         registry = get_registry(project_dir)
@@ -195,6 +198,8 @@ def create_client(
         "PreToolUse": [
             # Steering hook — runs on ALL tools to check for operator messages
             HookMatcher(hooks=[steering_hook]),
+            # User-defined tool permissions (deny list from project_settings.json)
+            HookMatcher(hooks=[tool_permissions_hook]),
             # Swarm worker: block direct task_list.json access (use MCP tools instead)
             HookMatcher(hooks=[worker_scope_hook]),
             # Bash command hooks
@@ -481,11 +486,13 @@ def create_orchestrator_client(
 
     # Configure hook context so steering_hook can find the project dir
     set_project_dir(project_dir)
+    set_permissions_project_dir(project_dir)
 
-    # Minimal hooks — only security + steering
+    # Minimal hooks — only security + steering + tool permissions
     hooks = {
         "PreToolUse": [
             HookMatcher(hooks=[steering_hook]),
+            HookMatcher(hooks=[tool_permissions_hook]),
             HookMatcher(matcher="Bash", hooks=[bash_security_hook]),
         ],
     }

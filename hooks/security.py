@@ -4,10 +4,73 @@ Security Hooks for Autonomous Coding Agent
 
 Pre-tool-use hooks that validate bash commands for security.
 Uses an allowlist approach - only explicitly permitted commands can run.
+Also enforces user-defined tool permissions from project_settings.json.
 """
 
+import json
 import os
 import shlex
+from pathlib import Path
+
+
+# --- Tool Permissions (loaded from project_settings.json) ---
+
+# Active project directory (set externally via set_project_dir or main_hooks)
+_permissions_project_dir: Path | None = None
+
+
+def set_permissions_project_dir(project_dir: Path) -> None:
+    """Set the project directory used to load tool permissions."""
+    global _permissions_project_dir
+    _permissions_project_dir = project_dir
+
+
+def load_tool_permissions(project_dir: Path) -> dict:
+    """Load user-defined tool permissions from project_settings.json.
+
+    The file lives at ``<project_dir>/.swarmweaver/project_settings.json``
+    (or ``<project_dir>/project_settings.json`` as a fallback).
+    The ``tool_permissions`` key is a dict mapping tool names to
+    ``"allow"`` or ``"deny"``.
+    """
+    for candidate in (
+        project_dir / ".swarmweaver" / "project_settings.json",
+        project_dir / "project_settings.json",
+    ):
+        if candidate.exists():
+            try:
+                data = json.loads(candidate.read_text(encoding="utf-8"))
+                return data.get("tool_permissions", {})
+            except (json.JSONDecodeError, OSError):
+                pass
+    return {}
+
+
+async def tool_permissions_hook(input_data, tool_use_id=None, context=None):
+    """Pre-tool-use hook that enforces user-defined tool permissions.
+
+    Reads ``tool_permissions`` from the project's ``project_settings.json``
+    and blocks any tool whose value is ``"deny"``.
+
+    Returns:
+        Empty dict to allow, or {"decision": "block", "message": "..."} to block.
+    """
+    project_dir = _permissions_project_dir
+    if project_dir is None:
+        return {}
+
+    permissions = load_tool_permissions(project_dir)
+    if not permissions:
+        return {}
+
+    tool_name = input_data.get("tool_name", "")
+    if permissions.get(tool_name) == "deny":
+        return {
+            "decision": "block",
+            "message": f"Tool '{tool_name}' is denied by user permissions in project_settings.json",
+        }
+
+    return {}
 
 
 # Allowed commands for development tasks

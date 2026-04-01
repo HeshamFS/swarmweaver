@@ -508,6 +508,31 @@ export function SettingsPanel({ open, onClose, settings, onUpdate, syncing, onSy
             </div>
           </Section>
 
+          {/* Output & Planning */}
+          <Section title="Output & Planning">
+            <label className="block">
+              <span className="text-[10px] text-[#555] mb-1 block font-mono">Output style</span>
+              <select
+                value={settings.outputStyle || "verbose"}
+                onChange={(e) => onUpdate({ outputStyle: e.target.value })}
+                className={selectClass}
+              >
+                <option value="verbose">Verbose — Full detail with explanations</option>
+                <option value="concise">Concise — Key information only</option>
+                <option value="structured">Structured — Organized headers and bullets</option>
+                <option value="minimal">Minimal — Just code and critical notes</option>
+              </select>
+            </label>
+            <div className="mt-2">
+              <Checkbox
+                checked={settings.planModeEnabled ?? false}
+                onChange={(v) => onUpdate({ planModeEnabled: v })}
+                label="Plan mode"
+                hint="Review execution plan before running the agent"
+              />
+            </div>
+          </Section>
+
           {/* MCP Servers */}
           <Section title="Integrations">
             <button

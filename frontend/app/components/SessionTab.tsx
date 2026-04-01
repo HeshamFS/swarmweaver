@@ -11,6 +11,24 @@ import LandingStep from "./wizard/LandingStep";
 // import SecurityReportReview from "./wizard/SecurityReportReview";
 import ChatWizardFeed from "./wizard/ChatWizardFeed";
 
+/* ── Output style instructions (prepended to task_input when non-default) ── */
+
+const OUTPUT_STYLE_INSTRUCTIONS: Record<string, string> = {
+  verbose: "",  // default — no extra instructions
+  concise: "\n[Output Style: Be concise. Key information only, minimal explanations.]\n",
+  structured: "\n[Output Style: Use organized headers, bullets, and clear sections.]\n",
+  minimal: "\n[Output Style: Bare essentials only — just code and critical notes.]\n",
+};
+
+function applyOutputStyle(
+  config: import("../hooks/useSwarmWeaver").RunConfig,
+  outputStyle: string | undefined,
+): import("../hooks/useSwarmWeaver").RunConfig {
+  const instruction = OUTPUT_STYLE_INSTRUCTIONS[outputStyle || "verbose"] || "";
+  if (!instruction) return config;
+  return { ...config, task_input: instruction + config.task_input };
+}
+
 /* ── Props ── */
 
 interface SessionTabProps {
@@ -166,32 +184,69 @@ export default function SessionTab({ tabId, isVisible, onMetaChange, globalSetti
 
   const handleStartQA = useCallback(
     (config: import("../hooks/useSwarmWeaver").RunConfig) => {
-      qaConfigRef.current = config;
+      const styled = applyOutputStyle(config, globalSettings?.outputStyle);
+      qaConfigRef.current = styled;
       setChatTaskInput(config.task_input);
       setChatProjectDir(config.project_dir);
       setWizardStep("qa");
 
       // Start wizard WS immediately — QA is the first turn
-      if (config.mode === "greenfield") {
-        runArchitectOnly(config);
+      if (styled.mode === "greenfield") {
+        runArchitectOnly(styled);
       } else {
         // All non-greenfield modes (feature, refactor, fix, evolve, security)
         // go through the unified wizard WS with mode-specific streaming phases
-        runPlanOnly(config);
+        runPlanOnly(styled);
       }
     },
-    [setWizardStep, runArchitectOnly, runPlanOnly]
+    [setWizardStep, runArchitectOnly, runPlanOnly, globalSettings?.outputStyle]
   );
+
+  /* ── Plan mode gate ── */
+  const [pendingPlanConfig, setPendingPlanConfig] = useState<import("../hooks/useSwarmWeaver").RunConfig | null>(null);
+
+  const handlePlanApprove = useCallback(() => {
+    if (!pendingPlanConfig) return;
+    const config = pendingPlanConfig;
+    setPendingPlanConfig(null);
+    // Use approveAndRun so artifacts are prepared on disk before execution
+    approveAndRun(config);
+  }, [pendingPlanConfig, approveAndRun]);
+
+  const handlePlanReject = useCallback(() => {
+    setPendingPlanConfig(null);
+    goBack();
+  }, [goBack]);
+
+  /** Wraps approveAndRun to intercept with plan mode gate when enabled */
+  const handleApproveAndRun = useCallback(() => {
+    if (globalSettings?.planModeEnabled && sw.lastConfig) {
+      // Hold the config for plan review before execution
+      setPendingPlanConfig(sw.lastConfig);
+      setWizardStep("execute");
+      return;
+    }
+    approveAndRun();
+  }, [globalSettings?.planModeEnabled, approveAndRun, sw.lastConfig, setWizardStep]);
 
   /* ── Direct launch handlers that also capture taskInput for chat feed ── */
 
   const handleRunDirect = useCallback(
     (config: import("../hooks/useSwarmWeaver").RunConfig) => {
+      const styled = applyOutputStyle(config, globalSettings?.outputStyle);
       setChatTaskInput(config.task_input);
       setChatProjectDir(config.project_dir);
-      runDirect(config);
+
+      // Plan mode gate: show plan in drawer before running
+      if (globalSettings?.planModeEnabled) {
+        setPendingPlanConfig(styled);
+        setWizardStep("execute");
+        return;
+      }
+
+      runDirect(styled);
     },
-    [runDirect]
+    [runDirect, globalSettings?.outputStyle, globalSettings?.planModeEnabled, setWizardStep]
   );
 
   const handleRunArchitectOnly = useCallback(
@@ -199,9 +254,9 @@ export default function SessionTab({ tabId, isVisible, onMetaChange, globalSetti
       setChatTaskInput(config.task_input);
       setChatProjectDir(config.project_dir);
       setWizardStep("qa");
-      runArchitectOnly(config);
+      runArchitectOnly(applyOutputStyle(config, globalSettings?.outputStyle));
     },
-    [runArchitectOnly, setWizardStep]
+    [runArchitectOnly, setWizardStep, globalSettings?.outputStyle]
   );
 
   const handleRunPlanOnly = useCallback(
@@ -209,18 +264,18 @@ export default function SessionTab({ tabId, isVisible, onMetaChange, globalSetti
       setChatTaskInput(config.task_input);
       setChatProjectDir(config.project_dir);
       setWizardStep("qa");
-      runPlanOnly(config);
+      runPlanOnly(applyOutputStyle(config, globalSettings?.outputStyle));
     },
-    [runPlanOnly, setWizardStep]
+    [runPlanOnly, setWizardStep, globalSettings?.outputStyle]
   );
 
   const handleRunScanOnly = useCallback(
     (config: import("../hooks/useSwarmWeaver").RunConfig) => {
       setChatTaskInput(config.task_input);
       setChatProjectDir(config.project_dir);
-      runScanOnly(config);
+      runScanOnly(applyOutputStyle(config, globalSettings?.outputStyle));
     },
-    [runScanOnly]
+    [runScanOnly, globalSettings?.outputStyle]
   );
 
   // QA is active when wizard stream is in QA phase or user has answered
@@ -290,7 +345,7 @@ export default function SessionTab({ tabId, isVisible, onMetaChange, globalSetti
               wizardElapsedSecs={sw.wizardStream?.elapsedSecs}
               wizardTimings={sw.wizardStream?.timings}
               tasks={tasks}
-              onApproveTasks={approveAndRun}
+              onApproveTasks={handleApproveAndRun}
               onBackFromTasks={goBack}
               swarmweaverState={sw}
               strategyText={sw.strategyText}
@@ -300,6 +355,9 @@ export default function SessionTab({ tabId, isVisible, onMetaChange, globalSetti
               onAcknowledgeReport={sw.handleAcknowledgeReport}
               securityFindings={sw.securityFindings}
               onApproveFindings={sw.handleApproveWizardFindings}
+              pendingPlanConfig={pendingPlanConfig}
+              onPlanApprove={handlePlanApprove}
+              onPlanReject={handlePlanReject}
             />
         </div>
       )}

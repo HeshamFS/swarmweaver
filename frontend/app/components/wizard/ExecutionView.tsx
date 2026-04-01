@@ -45,6 +45,12 @@ interface ExecutionViewProps {
     lastConfig?: RunConfig | null;
     workerTokenMap?: Record<number, { input: number; output: number; cacheRead: number; cacheCreation: number }>;
   };
+  /** When set, the execution view opens the Plan tab in the drawer and waits for approval before running */
+  pendingPlanConfig?: RunConfig | null;
+  /** Called when the user approves the plan — triggers the actual agent run */
+  onPlanApprove?: () => void;
+  /** Called when the user rejects the plan — goes back */
+  onPlanReject?: () => void;
 }
 
 /* ---- Elapsed time hook ---- */
@@ -88,7 +94,7 @@ function useElapsedTime(startTime: string | undefined, isRunning: boolean): stri
 
 /* ---- Main component ---- */
 
-export function ExecutionView({ state }: ExecutionViewProps) {
+export function ExecutionView({ state, pendingPlanConfig, onPlanApprove, onPlanReject }: ExecutionViewProps) {
   const {
     status,
     output,
@@ -136,10 +142,20 @@ export function ExecutionView({ state }: ExecutionViewProps) {
   const elapsed = useElapsedTime(sessionStats?.start_time, isRunning);
 
   // Drawer state
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(true);
   const [drawerSection, setDrawerSection] = useState<string | null>(null);
   const [tasksExpanded, setTasksExpanded] = useState(false);
 
+  // Plan mode: auto-open drawer on plan tab when a pending plan config arrives
+  const prevPendingPlanRef = useRef<boolean>(false);
+  useEffect(() => {
+    const hasPending = !!pendingPlanConfig;
+    if (hasPending && !prevPendingPlanRef.current) {
+      setDrawerSection("plan");
+      setDrawerOpen(true);
+    }
+    prevPendingPlanRef.current = hasPending;
+  }, [pendingPlanConfig]);
 
   // Shortcuts modal
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -436,6 +452,22 @@ export function ExecutionView({ state }: ExecutionViewProps) {
     return false;
   }, [events, isRunning]);
 
+  // Thinking elapsed timer — tracks how long the current thinking block has been active
+  const thinkingStartRef = useRef<number>(0);
+  const [thinkingElapsed, setThinkingElapsed] = useState(0);
+  useEffect(() => {
+    if (isThinking) {
+      if (thinkingStartRef.current === 0) thinkingStartRef.current = Date.now();
+      const id = setInterval(() => {
+        setThinkingElapsed(Math.floor((Date.now() - thinkingStartRef.current) / 1000));
+      }, 1000);
+      return () => clearInterval(id);
+    } else {
+      thinkingStartRef.current = 0;
+      setThinkingElapsed(0);
+    }
+  }, [isThinking]);
+
   // Project name from path
   const projectName = currentProject ? currentProject.split("/").filter(Boolean).pop() || currentProject : "Project";
 
@@ -483,6 +515,19 @@ export function ExecutionView({ state }: ExecutionViewProps) {
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
   }, [drawerOpen]);
+
+  // Listen for command palette drawer actions (dispatched from page.tsx)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const section = (e as CustomEvent).detail?.section;
+      if (section) {
+        setDrawerSection(section);
+        setDrawerOpen(true);
+      }
+    };
+    window.addEventListener("swarmweaver:open-drawer", handler);
+    return () => window.removeEventListener("swarmweaver:open-drawer", handler);
+  }, []);
 
   // Drawer callbacks
   const openDrawerSection = useCallback((section: string) => {
@@ -572,6 +617,7 @@ export function ExecutionView({ state }: ExecutionViewProps) {
               agentName={selectedWorkerId != null ? `Worker ${selectedWorkerId}` : "Agent"}
               label="Extended thinking..."
               active={true}
+              elapsedSecs={thinkingElapsed}
             />
           )}
           <SteeringBar
@@ -620,6 +666,10 @@ export function ExecutionView({ state }: ExecutionViewProps) {
         isSwarmMode={isSwarmMode}
         approvalRequest={approvalRequest}
         activeSection={drawerSection}
+        status={status}
+        pendingPlanConfig={pendingPlanConfig}
+        onPlanApprove={onPlanApprove}
+        onPlanReject={onPlanReject}
       />
 
       {/* Notification settings modal */}

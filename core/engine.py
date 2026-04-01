@@ -12,6 +12,8 @@ tracking — the only execution path in this system.
 
 import asyncio
 import json
+import subprocess
+import time
 import traceback
 from datetime import datetime
 from pathlib import Path
@@ -506,9 +508,12 @@ class Engine:
                             except Exception as e:
                                 print(f"[WARNING] MCP server status report failed: {e}", flush=True)
 
+                            _api_start = time.monotonic()
                             status, response, session_id, usage = (
                                 await self._stream_session(client, prompt)
                             )
+                            _api_duration_ms = int((time.monotonic() - _api_start) * 1000)
+                            ctx.budget_tracker.record_api_call(_api_duration_ms, phase_model)
                     except ProcessError as e:
                         error_detail = f"Claude CLI process failed (exit code {e.exit_code}): {e}"
                         if hasattr(e, 'stderr') and e.stderr:
@@ -576,6 +581,8 @@ class Engine:
                             output_tokens=usage.get("output_tokens", 0),
                             cost_usd=usage.get("cost_usd", 0.0),
                             model=phase_model,
+                            cache_read_tokens=usage.get("cache_read_tokens", 0),
+                            cache_write_tokens=usage.get("cache_creation_tokens", 0),
                         )
                     else:
                         # Fallback to estimated if SDK didn't provide usage
@@ -585,6 +592,25 @@ class Engine:
                         ctx.budget_tracker.record_usage(
                             estimated_input, estimated_output, phase_model
                         )
+
+                    # Record code changes via git diff
+                    try:
+                        _diff_result = subprocess.run(
+                            ["git", "diff", "--numstat", "HEAD"],
+                            cwd=str(self.project_dir),
+                            capture_output=True, text=True, timeout=10,
+                        )
+                        _lines_added = 0
+                        _lines_removed = 0
+                        for _diff_line in _diff_result.stdout.strip().split("\n"):
+                            _parts = _diff_line.split("\t")
+                            if len(_parts) >= 2 and _parts[0].isdigit():
+                                _lines_added += int(_parts[0])
+                                _lines_removed += int(_parts[1])
+                        if _lines_added > 0 or _lines_removed > 0:
+                            ctx.budget_tracker.record_code_changes(_lines_added, _lines_removed)
+                    except Exception:
+                        pass
 
                     # Push budget update
                     bs = ctx.budget_tracker.get_status()
@@ -935,6 +961,12 @@ class Engine:
                                 "tool": current_tool_name,
                                 "id": current_tool_id,
                             })
+                            # Track web search tool invocations
+                            if current_tool_name in (
+                                "WebSearch", "web_search",
+                                "mcp__web_search__search",
+                            ) and self._ctx:
+                                self._ctx.budget_tracker.record_web_search()
 
                     elif event_type == "content_block_delta":
                         delta = event.get("delta", {})
@@ -1029,6 +1061,12 @@ class Engine:
                                     "tool": tool_name,
                                     "id": tool_id,
                                 })
+                                # Track web search (only if not already counted via streaming)
+                                if tool_name in (
+                                    "WebSearch", "web_search",
+                                    "mcp__web_search__search",
+                                ) and self._ctx:
+                                    self._ctx.budget_tracker.record_web_search()
                             # Always emit the complete input
                             tool_input = getattr(block, "input", {})
                             if tool_input:

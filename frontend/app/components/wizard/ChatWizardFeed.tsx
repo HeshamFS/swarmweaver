@@ -101,6 +101,11 @@ interface ChatWizardFeedProps {
     lastConfig?: RunConfig | null;
     workerTokenMap?: Record<number, { input: number; output: number; cacheRead: number; cacheCreation: number }>;
   };
+
+  // Plan mode: pending config waiting for plan approval before execution
+  pendingPlanConfig?: RunConfig | null;
+  onPlanApprove?: () => void;
+  onPlanReject?: () => void;
 }
 
 const STEP_ORDER: WizardStep[] = ["landing", "qa", "architect-review", "strategy-review", "report-review", "plan-review", "security-review", "execute"];
@@ -121,6 +126,7 @@ export default function ChatWizardFeed(props: ChatWizardFeedProps) {
     wizardElapsedSecs, wizardTimings,
     tasks, onApproveTasks, onBackFromTasks,
     swarmweaverState,
+    pendingPlanConfig, onPlanApprove, onPlanReject,
   } = props;
 
   const feedRef = useRef<HTMLDivElement>(null);
@@ -222,7 +228,14 @@ export default function ChatWizardFeed(props: ChatWizardFeedProps) {
   // Once we're in execution, render the full ExecutionView which handles
   // StatusBar, ActivityFeed, SteeringBar, Drawer, Terminal, Approval
   if (inExecution) {
-    return <ExecutionView state={swarmweaverState} />;
+    return (
+      <ExecutionView
+        state={swarmweaverState}
+        pendingPlanConfig={pendingPlanConfig}
+        onPlanApprove={onPlanApprove}
+        onPlanReject={onPlanReject}
+      />
+    );
   }
 
   return (

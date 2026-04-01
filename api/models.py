@@ -146,6 +146,8 @@ class GlobalSettingsBody(BaseModel):
     skipQA: Optional[bool] = None
     theme: Optional[str] = None
     defaultBrowsePath: Optional[str] = None
+    planModeEnabled: Optional[bool] = None
+    outputStyle: Optional[str] = None  # "verbose" | "concise" | "structured" | "minimal"
 
 
 class ApiKeysBody(BaseModel):

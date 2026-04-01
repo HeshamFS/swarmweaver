@@ -210,6 +210,38 @@ async def save_api_keys(body: ApiKeysBody):
 
 
 
+# --- Output Styles ---
+
+AVAILABLE_OUTPUT_STYLES = [
+    {
+        "id": "verbose",
+        "name": "Verbose",
+        "description": "Full detail with all context and explanations",
+    },
+    {
+        "id": "concise",
+        "name": "Concise",
+        "description": "Key information only, minimal explanations",
+    },
+    {
+        "id": "structured",
+        "name": "Structured",
+        "description": "Organized with headers, bullets, and clear sections",
+    },
+    {
+        "id": "minimal",
+        "name": "Minimal",
+        "description": "Bare essentials — just code and critical notes",
+    },
+]
+
+
+@router.get("/api/output-styles")
+async def list_output_styles():
+    """List available output styles."""
+    return {"styles": AVAILABLE_OUTPUT_STYLES}
+
+
 @router.get("/api/notifications/config")
 async def get_notification_config(
     path: str = Query(..., description="Project directory path"),

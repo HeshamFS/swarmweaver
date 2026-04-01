@@ -138,11 +138,14 @@ async def _lightweight_claude_call(
 
     if proc.returncode != 0:
         error_msg = stderr_bytes.decode("utf-8", errors="replace").strip()
-        if "auth" in error_msg.lower() or "unauthorized" in error_msg.lower():
+        stdout_msg = stdout_bytes.decode("utf-8", errors="replace").strip()
+        # Combine stderr + stdout for better diagnostics (claude sometimes writes errors to stdout)
+        combined = error_msg or stdout_msg or f"exit code {proc.returncode}"
+        if "auth" in combined.lower() or "unauthorized" in combined.lower():
             raise HTTPException(status_code=401, detail="Authentication failed. Check CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY.")
-        if "rate" in error_msg.lower() and "limit" in error_msg.lower():
-            raise HTTPException(status_code=429, detail="Rate limited.")
-        raise HTTPException(status_code=500, detail=f"Claude call failed: {error_msg[:500]}")
+        if "rate" in combined.lower() and "limit" in combined.lower():
+            raise HTTPException(status_code=429, detail="Rate limited by Claude API. Please wait a moment and try again.")
+        raise HTTPException(status_code=500, detail=f"Claude call failed: {combined[:500]}")
 
     return stdout_bytes.decode("utf-8", errors="replace").strip()
 

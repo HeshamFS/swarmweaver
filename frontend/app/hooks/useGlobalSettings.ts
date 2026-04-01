@@ -21,6 +21,8 @@ export interface GlobalSettings {
   skipQA: boolean;
   theme: ThemeId;
   defaultBrowsePath: string | null;
+  outputStyle: string;
+  planModeEnabled: boolean;
 }
 
 const STORAGE_KEY = "swarmweaver-global-settings";
@@ -38,6 +40,8 @@ const DEFAULT_SETTINGS: GlobalSettings = {
   skipQA: false,
   theme: "ember",
   defaultBrowsePath: null,
+  outputStyle: "verbose",
+  planModeEnabled: false,
 };
 
 export function useGlobalSettings() {

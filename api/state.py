@@ -62,4 +62,6 @@ DEFAULT_GLOBAL_SETTINGS = {
     "skipQA": False,
     "theme": "ember",
     "defaultBrowsePath": None,
+    "planModeEnabled": False,
+    "outputStyle": "verbose",
 }

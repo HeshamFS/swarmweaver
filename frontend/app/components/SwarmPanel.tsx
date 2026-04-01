@@ -375,7 +375,7 @@ export function SwarmPanel({ projectDir, output, triageResults, mailVersion, wat
       <div className="flex flex-col h-full">
         <div className="flex-1 flex items-center justify-center p-4">
           <span className="text-sm text-text-muted">
-            Starting swarm workers...
+            No active swarm workers
           </span>
         </div>
       </div>

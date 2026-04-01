@@ -19,10 +19,10 @@ from core.paths import get_paths
 
 # Cost per million tokens (USD) — updated Feb 2026
 MODEL_COSTS_PER_MILLION: dict[str, dict[str, float]] = {
-    "claude-sonnet-4-6": {"input": 3.0, "output": 15.0},
-    "claude-sonnet-4-5-20250929": {"input": 3.0, "output": 15.0},
-    "claude-opus-4-6": {"input": 15.0, "output": 75.0},
-    "claude-haiku-4-5-20251001": {"input": 0.8, "output": 4.0},
+    "claude-sonnet-4-6": {"input": 3.0, "output": 15.0, "cache_read": 0.30, "cache_write": 3.75},
+    "claude-sonnet-4-5-20250929": {"input": 3.0, "output": 15.0, "cache_read": 0.30, "cache_write": 3.75},
+    "claude-opus-4-6": {"input": 15.0, "output": 75.0, "cache_read": 1.50, "cache_write": 18.75},
+    "claude-haiku-4-5-20251001": {"input": 0.80, "output": 4.0, "cache_read": 0.08, "cache_write": 1.0},
 }
 
 DEFAULT_MODEL = "claude-sonnet-4-5-20250929"
@@ -33,6 +33,12 @@ class BudgetState:
     """Persistent state for budget tracking."""
     total_input_tokens: int = 0
     total_output_tokens: int = 0
+    total_cache_read_tokens: int = 0
+    total_cache_write_tokens: int = 0
+    total_api_duration_ms: int = 0
+    total_lines_added: int = 0
+    total_lines_removed: int = 0
+    web_search_count: int = 0
     estimated_cost_usd: float = 0.0
     real_cost_usd: float = 0.0          # Actual SDK-reported cost
     budget_limit_usd: float = 0.0       # 0 = unlimited
@@ -42,7 +48,7 @@ class BudgetState:
     start_time: str = ""
     session_count: int = 0
     model_usage: dict[str, dict[str, int]] = field(default_factory=dict)
-    # model_usage: {"claude-sonnet-...": {"input": N, "output": N}}
+    # model_usage: {"claude-sonnet-...": {"input": N, "output": N, "cache_read": N, "cache_write": N, "api_calls": N, "api_duration_ms": N}}
 
 
 class BudgetTracker:
@@ -74,6 +80,12 @@ class BudgetTracker:
                 return BudgetState(
                     total_input_tokens=data.get("total_input_tokens", 0),
                     total_output_tokens=data.get("total_output_tokens", 0),
+                    total_cache_read_tokens=data.get("total_cache_read_tokens", 0),
+                    total_cache_write_tokens=data.get("total_cache_write_tokens", 0),
+                    total_api_duration_ms=data.get("total_api_duration_ms", 0),
+                    total_lines_added=data.get("total_lines_added", 0),
+                    total_lines_removed=data.get("total_lines_removed", 0),
+                    web_search_count=data.get("web_search_count", 0),
                     estimated_cost_usd=data.get("estimated_cost_usd", 0.0),
                     real_cost_usd=data.get("real_cost_usd", 0.0),
                     budget_limit_usd=data.get("budget_limit_usd", 0.0),
@@ -99,22 +111,41 @@ class BudgetTracker:
         except OSError:
             pass
 
+    def _ensure_model_usage(self, model: str) -> None:
+        """Ensure model_usage entry exists with all required fields."""
+        if model not in self.state.model_usage:
+            self.state.model_usage[model] = {
+                "input": 0, "output": 0,
+                "cache_read": 0, "cache_write": 0,
+                "api_calls": 0, "api_duration_ms": 0,
+            }
+        else:
+            # Backfill missing fields for entries loaded from old JSON
+            entry = self.state.model_usage[model]
+            for key in ("cache_read", "cache_write", "api_calls", "api_duration_ms"):
+                entry.setdefault(key, 0)
+
     def record_usage(
         self,
         input_tokens: int,
         output_tokens: int,
         model: str = DEFAULT_MODEL,
+        cache_read_tokens: int = 0,
+        cache_write_tokens: int = 0,
     ) -> None:
         """Record token usage from a completed session."""
         self.state.total_input_tokens += input_tokens
         self.state.total_output_tokens += output_tokens
+        self.state.total_cache_read_tokens += cache_read_tokens
+        self.state.total_cache_write_tokens += cache_write_tokens
         self.state.session_count += 1
 
         # Track per-model usage
-        if model not in self.state.model_usage:
-            self.state.model_usage[model] = {"input": 0, "output": 0}
+        self._ensure_model_usage(model)
         self.state.model_usage[model]["input"] += input_tokens
         self.state.model_usage[model]["output"] += output_tokens
+        self.state.model_usage[model]["cache_read"] += cache_read_tokens
+        self.state.model_usage[model]["cache_write"] += cache_write_tokens
 
         # Recalculate total cost across all models
         self.state.estimated_cost_usd = self._calculate_total_cost()
@@ -130,6 +161,8 @@ class BudgetTracker:
         output_tokens: int,
         cost_usd: float,
         model: str = DEFAULT_MODEL,
+        cache_read_tokens: int = 0,
+        cache_write_tokens: int = 0,
     ) -> None:
         """Record actual SDK-reported token usage and cost from ResultMessage.
 
@@ -138,14 +171,17 @@ class BudgetTracker:
         """
         self.state.total_input_tokens += input_tokens
         self.state.total_output_tokens += output_tokens
+        self.state.total_cache_read_tokens += cache_read_tokens
+        self.state.total_cache_write_tokens += cache_write_tokens
         self.state.real_cost_usd += cost_usd
         self.state.session_count += 1
 
         # Track per-model usage
-        if model not in self.state.model_usage:
-            self.state.model_usage[model] = {"input": 0, "output": 0}
+        self._ensure_model_usage(model)
         self.state.model_usage[model]["input"] += input_tokens
         self.state.model_usage[model]["output"] += output_tokens
+        self.state.model_usage[model]["cache_read"] += cache_read_tokens
+        self.state.model_usage[model]["cache_write"] += cache_write_tokens
 
         # Also update estimated_cost for backward compatibility
         self.state.estimated_cost_usd = self._calculate_total_cost()
@@ -153,6 +189,46 @@ class BudgetTracker:
         # Clear error streak on successful usage
         self.state.consecutive_errors = 0
 
+        self.save()
+
+    def record_cache_usage(
+        self,
+        cache_read_tokens: int,
+        cache_write_tokens: int,
+        model: str = DEFAULT_MODEL,
+    ) -> None:
+        """Record cache token usage."""
+        self.state.total_cache_read_tokens += cache_read_tokens
+        self.state.total_cache_write_tokens += cache_write_tokens
+
+        self._ensure_model_usage(model)
+        self.state.model_usage[model]["cache_read"] += cache_read_tokens
+        self.state.model_usage[model]["cache_write"] += cache_write_tokens
+
+        # Recalculate cost to include cache token costs
+        self.state.estimated_cost_usd = self._calculate_total_cost()
+        self.save()
+
+    def record_api_call(self, duration_ms: int, model: str = DEFAULT_MODEL) -> None:
+        """Record API call duration."""
+        self.state.total_api_duration_ms += duration_ms
+
+        self._ensure_model_usage(model)
+        self.state.model_usage[model]["api_calls"] += 1
+        self.state.model_usage[model]["api_duration_ms"] += duration_ms
+        self.save()
+
+    def record_code_changes(self, lines_added: int, lines_removed: int) -> None:
+        """Record code change metrics."""
+        self.state.total_lines_added += lines_added
+        self.state.total_lines_removed += lines_removed
+        self.save()
+
+    def record_web_search(self) -> None:
+        """Increment web search count."""
+        self.state.web_search_count += 1
+        # Recalculate cost since web searches have a cost
+        self.state.estimated_cost_usd = self._calculate_total_cost()
         self.save()
 
     def record_error(self) -> None:
@@ -221,6 +297,12 @@ class BudgetTracker:
         return {
             "total_input_tokens": self.state.total_input_tokens,
             "total_output_tokens": self.state.total_output_tokens,
+            "total_cache_read_tokens": self.state.total_cache_read_tokens,
+            "total_cache_write_tokens": self.state.total_cache_write_tokens,
+            "total_api_duration_ms": self.state.total_api_duration_ms,
+            "total_lines_added": self.state.total_lines_added,
+            "total_lines_removed": self.state.total_lines_removed,
+            "web_search_count": self.state.web_search_count,
             "estimated_cost_usd": round(self.state.estimated_cost_usd, 4),
             "real_cost_usd": round(self.state.real_cost_usd, 4),
             "budget_limit_usd": self.state.budget_limit_usd,
@@ -232,6 +314,8 @@ class BudgetTracker:
             "consecutive_errors": self.state.consecutive_errors,
             "session_count": self.state.session_count,
             "model_usage": self.state.model_usage,
+            "cache_efficiency": self.cache_efficiency,
+            "cost_display": self.get_cost_display(),
             "exceeded": exceeded,
             "exceeded_reason": reason,
             "start_time": self.state.start_time,
@@ -242,6 +326,24 @@ class BudgetTracker:
         total = 0.0
         for model, usage in self.state.model_usage.items():
             costs = MODEL_COSTS_PER_MILLION.get(model, MODEL_COSTS_PER_MILLION[DEFAULT_MODEL])
-            total += (usage["input"] * costs["input"] / 1_000_000)
-            total += (usage["output"] * costs["output"] / 1_000_000)
+            total += (usage.get("input", 0) * costs["input"] / 1_000_000)
+            total += (usage.get("output", 0) * costs["output"] / 1_000_000)
+            total += (usage.get("cache_read", 0) * costs["cache_read"] / 1_000_000)
+            total += (usage.get("cache_write", 0) * costs["cache_write"] / 1_000_000)
+        total += (self.state.web_search_count * 0.01)
         return total
+
+    def get_cost_display(self) -> str:
+        """Return formatted cost string: 2 decimals if >= $0.50, 4 decimals otherwise."""
+        cost = self.effective_cost
+        if cost >= 0.50:
+            return f"${cost:.2f}"
+        return f"${cost:.4f}"
+
+    @property
+    def cache_efficiency(self) -> float:
+        """Return ratio of cache_read_tokens to total input tokens (0.0 if no input)."""
+        total_input = self.state.total_input_tokens
+        if total_input == 0:
+            return 0.0
+        return self.state.total_cache_read_tokens / total_input

@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { JetBrains_Mono } from "next/font/google";
 import { Toaster } from "sonner";
-import { CommandPalette } from "./components/CommandPalette";
 import "./globals.css";
 
 const jetbrainsMono = JetBrains_Mono({
@@ -26,7 +25,6 @@ export default function RootLayout({
       <body className="antialiased font-sans">
         {children}
         <Toaster theme="dark" position="bottom-right" richColors />
-        <CommandPalette />
       </body>
     </html>
   );

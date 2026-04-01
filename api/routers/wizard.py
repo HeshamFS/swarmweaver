@@ -191,6 +191,73 @@ async def generate_plan(req: PlanRequest):
     return {"task_list": _parse_json_response(response_text)}
 
 
+@router.post("/api/plan/modify-with-ai")
+async def modify_plan_with_ai(
+    path: str = Query(..., description="Project directory path"),
+    feedback: str = Query(..., description="User modification instructions"),
+    target: str = Query("all", description="What to modify: spec, tasks, or all"),
+    model: str = Query("claude-sonnet-4-6", description="Model to use"),
+):
+    """Use Claude to modify the spec and/or tasks based on user feedback."""
+    project_dir = Path(path)
+    paths = get_paths(project_dir)
+
+    results: dict = {"status": "ok", "modified": []}
+
+    # Modify spec if requested
+    if target in ("spec", "all") and paths.app_spec.exists():
+        current_spec = paths.app_spec.read_text(encoding="utf-8")
+        prompt = (
+            f"Here is the current project specification:\n\n"
+            f"```\n{current_spec}\n```\n\n"
+            f"The user wants the following modification:\n{feedback}\n\n"
+            f"Please output the COMPLETE modified specification. "
+            f"Keep the same format and structure. Only change what the user asked for. "
+            f"Output ONLY the specification text, nothing else."
+        )
+        try:
+            new_spec = await _lightweight_claude_call(prompt, model=model, timeout_seconds=120)
+            if new_spec and len(new_spec) > 50:
+                paths.app_spec.write_text(new_spec, encoding="utf-8")
+                results["modified"].append("spec")
+                results["spec"] = new_spec
+        except Exception as e:
+            results["spec_error"] = str(e)
+
+    # Modify tasks if requested
+    if target in ("tasks", "all") and paths.task_list.exists():
+        current_tasks = paths.task_list.read_text(encoding="utf-8")
+        current_spec = ""
+        if paths.app_spec.exists():
+            current_spec = paths.app_spec.read_text(encoding="utf-8")
+
+        prompt = (
+            f"Here is the current task list:\n\n"
+            f"```json\n{current_tasks}\n```\n\n"
+        )
+        if current_spec:
+            prompt += f"Here is the project specification for context:\n\n```\n{current_spec[:3000]}\n```\n\n"
+        prompt += (
+            f"The user wants the following modification:\n{feedback}\n\n"
+            f"Please output the COMPLETE modified task list as valid JSON. "
+            f"Keep the same format and structure. Only change what the user asked for. "
+            f"Output ONLY the JSON, nothing else."
+        )
+        try:
+            new_tasks_text = await _lightweight_claude_call(prompt, model=model, timeout_seconds=180)
+            new_tasks = _parse_json_response(new_tasks_text)
+            if new_tasks:
+                paths.task_list.write_text(
+                    json.dumps(new_tasks, indent=2), encoding="utf-8"
+                )
+                results["modified"].append("tasks")
+                results["tasks"] = new_tasks
+        except Exception as e:
+            results["tasks_error"] = str(e)
+
+    return results
+
+
 @router.post("/api/scan/generate")
 async def generate_security_scan(req: ScanRequest):
     """Run a security scan on a codebase and return findings."""
