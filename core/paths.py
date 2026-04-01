@@ -23,23 +23,48 @@ class ProjectPaths:
     # Ensure .swarmweaver exists
     # ------------------------------------------------------------------
     def ensure_dir(self) -> None:
-        """Create .swarmweaver/ if it doesn't exist."""
+        """Create .swarmweaver/ and memory subdirectories if they don't exist."""
         p = str(self.swarmweaver_dir)
-        if os.path.isdir(p):
-            return
+        if not os.path.isdir(p):
+            try:
+                os.makedirs(p, exist_ok=True)
+            except (FileExistsError, OSError):
+                # WSL2/NTFS ghost entry: mkdir fails with EEXIST for a directory
+                # name that was previously deleted but left a phantom MFT record.
+                # Neither os.path.exists nor os.path.isdir can see it, but mkdir
+                # refuses to create it.  Fall back to Windows cmd.exe mkdir.
+                if os.path.isdir(p):
+                    pass
+                elif p.startswith("/mnt/"):
+                    self._wsl_mkdir_fallback(p)
+                else:
+                    raise
+
+        # Auto-initialize memory structure for this project
+        self._ensure_memory_structure()
+
+    def _ensure_memory_structure(self) -> None:
+        """Create memory subdirectories and default files if missing."""
         try:
-            os.makedirs(p, exist_ok=True)
-        except (FileExistsError, OSError):
-            # WSL2/NTFS ghost entry: mkdir fails with EEXIST for a directory
-            # name that was previously deleted but left a phantom MFT record.
-            # Neither os.path.exists nor os.path.isdir can see it, but mkdir
-            # refuses to create it.  Fall back to Windows cmd.exe mkdir.
-            if os.path.isdir(p):
-                return
-            if p.startswith("/mnt/"):
-                self._wsl_mkdir_fallback(p)
-            else:
-                raise
+            # memory/ directory
+            mem_dir = self.swarmweaver_dir / "memory"
+            mem_dir.mkdir(parents=True, exist_ok=True)
+
+            # memory/MEMORY.md index
+            mem_index = mem_dir / "MEMORY.md"
+            if not mem_index.exists():
+                mem_index.write_text(
+                    "<!-- Project memory index. Each entry is one line, under 150 chars. -->\n",
+                    encoding="utf-8",
+                )
+
+            # rules/ directory
+            (self.swarmweaver_dir / "rules").mkdir(exist_ok=True)
+
+            # Also ensure global memory exists (once)
+            _ensure_global_memory()
+        except OSError:
+            pass  # Non-fatal: memory is best-effort
 
     @staticmethod
     def _wsl_mkdir_fallback(unix_path: str) -> None:
@@ -206,3 +231,36 @@ class ProjectPaths:
 def get_paths(project_dir) -> ProjectPaths:
     """Convenience factory — returns a ``ProjectPaths`` instance."""
     return ProjectPaths(Path(project_dir))
+
+
+def _ensure_global_memory() -> None:
+    """Create ~/.swarmweaver/ global memory structure if missing (idempotent)."""
+    try:
+        base = Path.home() / ".swarmweaver"
+        base.mkdir(parents=True, exist_ok=True)
+
+        # Global CLAUDE.md
+        claude_md = base / "CLAUDE.md"
+        if not claude_md.exists():
+            claude_md.write_text(
+                "# Global SwarmWeaver Instructions\n\n"
+                "These instructions apply to ALL projects.\n\n"
+                "## Preferences\n\n"
+                "<!-- Add your global preferences here -->\n",
+                encoding="utf-8",
+            )
+
+        # Global memory/MEMORY.md
+        mem_dir = base / "memory"
+        mem_dir.mkdir(exist_ok=True)
+        mem_index = mem_dir / "MEMORY.md"
+        if not mem_index.exists():
+            mem_index.write_text(
+                "<!-- Global memory index. Each entry is one line, under 150 chars. -->\n",
+                encoding="utf-8",
+            )
+
+        # Global rules/
+        (base / "rules").mkdir(exist_ok=True)
+    except OSError:
+        pass  # Non-fatal

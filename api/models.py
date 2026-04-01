@@ -153,3 +153,12 @@ class GlobalSettingsBody(BaseModel):
 class ApiKeysBody(BaseModel):
     anthropic_api_key: Optional[str] = None
     claude_code_oauth_token: Optional[str] = None
+
+
+class KeybindingEntry(BaseModel):
+    id: str
+    keys: list[str]
+
+
+class KeybindingsBody(BaseModel):
+    bindings: list[KeybindingEntry]

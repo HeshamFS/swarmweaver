@@ -152,21 +152,42 @@ def build_prompt(
         "agent_memory": "",    # Populated via MELS PrimingEngine
     }
 
+    # Load CLAUDE.md instructions (always loaded, highest priority)
+    claude_md_context = ""
+    file_memory_context = ""
+    try:
+        from services.memory_files import build_claude_md_context, build_memory_context
+        claude_md_context = build_claude_md_context(project_dir)
+        file_memory_context = build_memory_context(project_dir)
+    except Exception:
+        pass
+
+    # Combine: CLAUDE.md instructions + Memory index + MELS expertise
+    agent_memory_parts = []
+    if claude_md_context:
+        agent_memory_parts.append(claude_md_context)
+    if file_memory_context:
+        agent_memory_parts.append(file_memory_context)
+
     # Load expertise context via MELS
+    mels_primed = ""
     if project_dir:
         try:
             from services.expertise_priming import PrimingEngine
             from services.expertise_store import get_cross_project_store
             engine = PrimingEngine()
             store = get_cross_project_store()
-            memory_context = engine.prime(
+            mels_primed = engine.prime(
                 store, file_scope=[], domains=None,
                 task_description=task_input or "",
             )
-            if memory_context:
-                context["agent_memory"] = memory_context
         except Exception:
             pass
+
+    if mels_primed:
+        agent_memory_parts.append(f"# Expertise (MELS)\n\n{mels_primed}")
+
+    context["agent_memory"] = "\n\n---\n\n".join(agent_memory_parts)
 
     # Load plugin prompt fragments if available
     if project_dir:

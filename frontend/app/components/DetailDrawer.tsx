@@ -31,6 +31,10 @@ import { ProfileView } from "./ProfileView";
 import type { CodebaseProfile } from "./ProfileView";
 import { PermissionsPanel } from "./PermissionsPanel";
 import { PlanView } from "./PlanView";
+import { SkillPanel } from "./SkillPanel";
+import { ContextPanel } from "./ContextPanel";
+import { DreamPanel } from "./DreamPanel";
+import { MemoryPanel } from "./MemoryPanel";
 
 export interface DetailDrawerProps {
   isOpen: boolean;
@@ -146,7 +150,7 @@ const DEFAULT_WIDTH = 900;
 const MAX_WIDTH = 900;
 
 /* ---- Tab type ---- */
-type DrawerTab = "tasks" | "monitor" | "costs" | "code" | "sessions" | "expertise" | "swarm" | "insights" | "agents" | "audit" | "permissions" | "plan";
+type DrawerTab = "tasks" | "monitor" | "costs" | "code" | "sessions" | "expertise" | "swarm" | "insights" | "agents" | "audit" | "context" | "dreams" | "permissions" | "plan" | "skills" | "memory";
 
 /* ---- Main Component ---- */
 
@@ -272,6 +276,8 @@ export function DetailDrawer({
     insights: "insights",
     permissions: "permissions",
     plan: "plan",
+    skills: "skills",
+    context: "context",
     costs: "costs",
     budget: "costs",
     "run-history": "costs",
@@ -287,6 +293,8 @@ export function DetailDrawer({
     "expertise-causal": "expertise",
     "expertise-lessons": "expertise",
     "expertise-analytics": "expertise",
+    dreams: "dreams",
+    memory: "memory",
     mail: "swarm",
     merges: "swarm",
   };
@@ -683,21 +691,59 @@ export function DetailDrawer({
     return () => document.removeEventListener("keydown", handler);
   }, [isOpen, onClose]);
 
-  // Tab definitions
-  const tabs: { key: DrawerTab; label: string; icon: string }[] = [
-    { key: "tasks", label: "Tasks", icon: "\u2611" },
-    { key: "monitor", label: "Monitor", icon: "\u25C6" },
-    { key: "costs", label: "Costs", icon: "$" },
-    { key: "code", label: "Code", icon: "\u2726" },
-    { key: "sessions", label: "Sessions", icon: "\u25A3" },
-    { key: "expertise", label: "Expertise", icon: "\u2261" },
-    { key: "insights", label: "Insights", icon: "\u25C8" },
-    { key: "agents", label: "Agents", icon: "\u2726" },
-    { key: "audit", label: "Audit", icon: "\u25C7" },
-    { key: "permissions", label: "Perms", icon: "\u25A0" },
-    { key: "plan", label: "Plan", icon: "\u25B6" },
-    ...(isSwarmMode ? [{ key: "swarm" as DrawerTab, label: "Swarm", icon: "\u2302" }] : []),
+  // Grouped tab definitions (2-level hierarchy)
+  type TabGroup = { key: string; label: string; icon: string; tabs: { key: DrawerTab; label: string }[] };
+  const tabGroups: TabGroup[] = [
+    {
+      key: "tasks", label: "Tasks", icon: "\u2611",
+      tabs: [
+        { key: "tasks", label: "Tasks" },
+        { key: "plan", label: "Plan" },
+      ],
+    },
+    {
+      key: "observe", label: "Observe", icon: "\u25C6",
+      tabs: [
+        { key: "monitor", label: "Timeline" },
+        { key: "costs", label: "Costs" },
+        { key: "agents", label: "Agents" },
+        { key: "insights", label: "Insights" },
+        { key: "audit", label: "Audit" },
+        { key: "context", label: "Context" },
+      ],
+    },
+    {
+      key: "tools", label: "Tools", icon: "\u2726",
+      tabs: [
+        { key: "skills", label: "Skills" },
+        { key: "code", label: "Code" },
+        { key: "permissions", label: "Perms" },
+      ],
+    },
+    {
+      key: "knowledge", label: "Knowledge", icon: "\u2261",
+      tabs: [
+        { key: "memory", label: "Memory" },
+        { key: "expertise", label: "Expertise" },
+        { key: "dreams", label: "Dreams" },
+        { key: "sessions", label: "Sessions" },
+      ],
+    },
+    ...(isSwarmMode ? [{
+      key: "swarm", label: "Swarm", icon: "\u2302",
+      tabs: [{ key: "swarm" as DrawerTab, label: "Swarm" }],
+    }] : []),
   ];
+
+  // Find which group the active tab belongs to
+  const activeGroup = tabGroups.find((g) => g.tabs.some((t) => t.key === activeDrawerTab)) || tabGroups[0];
+  const [selectedGroup, setSelectedGroup] = useState(activeGroup?.key || "tasks");
+
+  // When active tab changes externally (e.g., from command palette), sync the group
+  const currentGroup = tabGroups.find((g) => g.tabs.some((t) => t.key === activeDrawerTab));
+  if (currentGroup && currentGroup.key !== selectedGroup) {
+    setSelectedGroup(currentGroup.key);
+  }
 
   return (
     <>
@@ -770,24 +816,57 @@ export function DetailDrawer({
               </button>
             </div>
 
-            {/* Tab bar */}
-            <div className="flex gap-0.5 px-2 py-1.5 border-b border-[#222] bg-[#0C0C0C] shrink-0 overflow-x-auto">
-              {tabs.map(({ key, label, icon }) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setActiveDrawerTab(key)}
-                  className={`flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-mono font-bold uppercase tracking-wider rounded transition-colors shrink-0 ${
-                    activeDrawerTab === key
-                      ? "bg-[var(--color-accent)]/20 text-[var(--color-accent)] border border-[var(--color-accent)]/50"
-                      : "text-[#555] hover:text-[#888] hover:bg-[#1A1A1A] border border-transparent"
-                  }`}
-                >
-                  <span>{icon}</span>
-                  {label}
-                </button>
-              ))}
+            {/* Top-level group bar */}
+            <div className="flex gap-0.5 px-2 py-1.5 border-b border-[#222] bg-[#0C0C0C] shrink-0">
+              {tabGroups.map((group) => {
+                const isActive = group.key === selectedGroup;
+                return (
+                  <button
+                    key={group.key}
+                    type="button"
+                    onClick={() => {
+                      setSelectedGroup(group.key);
+                      // Switch to first tab in the group if current tab isn't in it
+                      if (!group.tabs.some((t) => t.key === activeDrawerTab)) {
+                        setActiveDrawerTab(group.tabs[0].key);
+                      }
+                    }}
+                    className={`flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-mono font-bold uppercase tracking-wider transition-colors shrink-0 ${
+                      isActive
+                        ? "bg-[var(--color-accent)]/15 text-[var(--color-accent)] border-b-2 border-[var(--color-accent)]"
+                        : "text-[#555] hover:text-[#888] hover:bg-[#1A1A1A]"
+                    }`}
+                  >
+                    <span>{group.icon}</span>
+                    {group.label}
+                  </button>
+                );
+              })}
             </div>
+
+            {/* Sub-tab bar (only if group has >1 tab) */}
+            {(() => {
+              const group = tabGroups.find((g) => g.key === selectedGroup);
+              if (!group || group.tabs.length <= 1) return null;
+              return (
+                <div className="flex gap-0.5 px-3 py-1 border-b border-[#222] bg-[#0C0C0C]/80 shrink-0">
+                  {group.tabs.map(({ key, label }) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setActiveDrawerTab(key)}
+                      className={`px-2 py-0.5 text-[9px] font-mono font-medium uppercase tracking-wider transition-colors ${
+                        activeDrawerTab === key
+                          ? "text-[var(--color-accent)] bg-[var(--color-accent)]/10"
+                          : "text-[#555] hover:text-[#888]"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              );
+            })()}
 
             {/* Scrollable sections (filtered by active tab) */}
             <div className="flex-1 overflow-y-auto tui-scrollbar">
@@ -1382,6 +1461,13 @@ export function DetailDrawer({
               </>
               )}
 
+              {/* ═══════════════════ Memory tab ═══════════════════ */}
+              {activeDrawerTab === "memory" && projectPath && (
+                <div className="p-0 h-full">
+                  <MemoryPanel projectDir={projectPath} />
+                </div>
+              )}
+
               {/* ═══════════════════ Expertise tab ═══════════════════ */}
               {activeDrawerTab === "expertise" && (
               <>
@@ -1706,6 +1792,20 @@ export function DetailDrawer({
                 </div>
               )}
 
+              {/* ═══════════════════ Context tab ═══════════════════ */}
+              {activeDrawerTab === "context" && (
+                <div className="p-0 h-full">
+                  <ContextPanel projectDir={projectPath} />
+                </div>
+              )}
+
+              {/* ═══════════════════ Dreams tab ═══════════════════ */}
+              {activeDrawerTab === "dreams" && projectPath && (
+                <div className="p-0 h-full">
+                  <DreamPanel projectDir={projectPath} />
+                </div>
+              )}
+
               {/* ═══════════════════ Permissions tab ═══════════════════ */}
               {activeDrawerTab === "permissions" && projectPath && (
                 <div className="p-0 h-full">
@@ -1725,6 +1825,13 @@ export function DetailDrawer({
                     onReject={onPlanReject || (() => {})}
                     onModify={() => {}}
                   />
+                </div>
+              )}
+
+              {/* ═══════════════════ Skills tab ═══════════════════ */}
+              {activeDrawerTab === "skills" && (
+                <div className="p-0 h-full">
+                  <SkillPanel projectDir={projectPath} />
                 </div>
               )}
 

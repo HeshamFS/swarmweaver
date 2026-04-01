@@ -5,6 +5,7 @@ import type { GlobalSettings, ThemeId } from "../hooks/useGlobalSettings";
 import { MODELS, PRESETS } from "../utils/constants";
 import { FolderPicker } from "./FolderPicker";
 import { MCPModal } from "./MCPPanel";
+import { KeybindingsEditor } from "./KeybindingsEditor";
 import { Check, XCircle } from "lucide-react";
 
 const THEMES: { id: ThemeId; label: string; color: string }[] = [
@@ -69,6 +70,7 @@ export function SettingsPanel({ open, onClose, settings, onUpdate, syncing, onSy
   const [themeOpen, setThemeOpen] = useState(false);
   const [showFolderPicker, setShowFolderPicker] = useState(false);
   const [mcpOpen, setMcpOpen] = useState(false);
+  const [keybindingsOpen, setKeybindingsOpen] = useState(false);
   const themeRef = useRef<HTMLDivElement>(null);
 
   /* Close theme dropdown on click outside */
@@ -508,6 +510,20 @@ export function SettingsPanel({ open, onClose, settings, onUpdate, syncing, onSy
             </div>
           </Section>
 
+          {/* Keyboard Shortcuts */}
+          <Section title="Keyboard Shortcuts">
+            <button
+              onClick={() => setKeybindingsOpen(true)}
+              className="flex items-center justify-between w-full bg-[#1A1A1A] text-[#E0E0E0] text-[11px] font-mono px-2 py-1.5 border border-[#333] hover:border-[var(--color-accent)] transition-colors"
+            >
+              <span className="flex items-center gap-2">
+                <span className="text-[#888]">{"\u2328"}</span>
+                Customize Shortcuts
+              </span>
+              <span className="text-[10px] text-[#555]">{"Configure \u203A"}</span>
+            </button>
+          </Section>
+
           {/* Output & Planning */}
           <Section title="Output & Planning">
             <label className="block">
@@ -589,6 +605,8 @@ export function SettingsPanel({ open, onClose, settings, onUpdate, syncing, onSy
           </button>
         </div>
       </div>
+
+      <KeybindingsEditor open={keybindingsOpen} onClose={() => setKeybindingsOpen(false)} />
 
       {/* MCP Servers modal */}
       {mcpOpen && (

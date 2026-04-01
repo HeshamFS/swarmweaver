@@ -324,3 +324,31 @@ async def api_get_template(template_id: str):
     result = template.to_dict()
     result["spec_content"] = template.load_spec()
     return result
+
+
+# --- Context Management ---
+
+@router.get("/api/context/status")
+async def get_context_status(
+    path: str = Query(..., description="Project directory path"),
+):
+    """Get current context management status."""
+    from core.context_manager import ContextManager, CompactionConfig
+    mgr = ContextManager(CompactionConfig(), Path(path))
+    return mgr.get_status()
+
+
+@router.get("/api/context/config")
+async def get_context_config():
+    """Get context compaction configuration."""
+    from core.context_manager import CompactionConfig
+    config = CompactionConfig()
+    return {
+        "buffer_tokens": config.buffer_tokens,
+        "output_reserve_tokens": config.output_reserve_tokens,
+        "circuit_breaker_max": config.circuit_breaker_max,
+        "microcompact_age_minutes": config.microcompact_age_minutes,
+        "enable_microcompact": config.enable_microcompact,
+        "enable_session_memory": config.enable_session_memory,
+        "enable_legacy_compact": config.enable_legacy_compact,
+    }
