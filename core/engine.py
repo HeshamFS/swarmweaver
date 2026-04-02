@@ -777,8 +777,9 @@ class Engine:
                             pass
 
                     # Auto-save task_list.json after each turn (don't rely on agent)
+                    # Use _task_list_dir (main project for swarm workers, project_dir for single agent)
                     try:
-                        tl_autosave = TaskList(self.project_dir)
+                        tl_autosave = TaskList(self._task_list_dir)
                         tl_autosave.load()
                         if hasattr(tl_autosave, 'save'):
                             tl_autosave.save()

@@ -404,14 +404,28 @@ class SmartOrchestrator:
             pass
 
     def _save_worker_registry(self) -> None:
-        """Persist worker state to disk AND transcript for resume capability."""
+        """Persist worker state to disk AND transcript for resume capability.
+
+        APPEND-ONLY: never loses previous workers. Existing registry entries
+        are preserved; only the current workers' entries are updated.
+        """
         try:
             self._registry_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Load existing registry first (preserve previous workers)
+            existing = {}
+            if self._registry_path.exists():
+                try:
+                    existing = json.loads(self._registry_path.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, OSError):
+                    existing = {}
+
             registry = {
                 "next_worker_id": self._next_worker_id,
-                "workers": {}
+                "workers": existing.get("workers", {}),  # Keep ALL previous workers
             }
             active_workers = []
+            # Update/add current workers
             for wid, handle in self._workers.items():
                 wdata = {
                     "id": wid,
@@ -1448,8 +1462,9 @@ class SmartOrchestrator:
                             print(f"[WARNING] Efficiency warning delivery failed: {e}", flush=True)
 
         # Create Engine with worker task scope for MCP tool enforcement
-        # task_list_dir=worktree_path so worker_tools write to worktree's task_list;
-        # merge sync copies worktree -> main. mail_project_dir=main for report_to_orchestrator.
+        # task_list_dir=self.project_dir so workers write task status to the MAIN project.
+        # This ensures task statuses survive worktree cleanup on merge.
+        # Code changes go to the worktree (project_dir=worktree_path) and are merged via git.
         worker_max_budget = 2.0   # $2 per worker max — prevents runaway costs
         worker_max_turns = 200    # bounded turns — prevents infinite loops
         # Spawn per-worktree LSP servers for detected languages
@@ -1486,7 +1501,7 @@ class SmartOrchestrator:
             on_event=worker_on_event,
             task_scope=task_ids if task_ids else None,
             worker_id=worker_id,
-            task_list_dir=worktree_path,
+            task_list_dir=self.project_dir,
             mail_project_dir=self.project_dir,
             max_budget_usd=worker_max_budget,
             max_turns=worker_max_turns,
