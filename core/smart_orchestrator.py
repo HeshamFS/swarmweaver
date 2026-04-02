@@ -307,6 +307,7 @@ class SmartOrchestrator:
 
         self._workers: dict[int, WorkerHandle] = {}
         self._next_worker_id = 1
+        self._registry_path = self.project_dir / ".swarmweaver" / "swarm" / "worker_registry.json"
         self._stopped = False
         self._complete = False
         self._current_client = None  # ClaudeSDKClient — set during run() for steering
@@ -402,6 +403,93 @@ class SmartOrchestrator:
         except RuntimeError:
             pass
 
+    def _save_worker_registry(self) -> None:
+        """Persist worker state to disk AND transcript for resume capability."""
+        try:
+            self._registry_path.parent.mkdir(parents=True, exist_ok=True)
+            registry = {
+                "next_worker_id": self._next_worker_id,
+                "workers": {}
+            }
+            active_workers = []
+            for wid, handle in self._workers.items():
+                wdata = {
+                    "id": wid,
+                    "name": getattr(handle, "name", f"worker-{wid}"),
+                    "task_ids": list(getattr(handle, "assigned_task_ids", [])),
+                    "worktree_path": str(getattr(handle, "worktree_path", "")),
+                    "branch": getattr(handle, "branch_name", f"swarm/worker-{wid}"),
+                    "status": handle.status if hasattr(handle, "status") else "unknown",
+                }
+                registry["workers"][str(wid)] = wdata
+                if wdata["status"] in ("running", "starting"):
+                    active_workers.append(wdata)
+            self._registry_path.write_text(json.dumps(registry, indent=2), encoding="utf-8")
+
+            # Also write orchestrator state to the unified transcript
+            try:
+                from services.transcript import TranscriptReader
+                transcript_dir = self.project_dir / ".swarmweaver" / "transcripts"
+                if transcript_dir.is_dir():
+                    transcripts = sorted(transcript_dir.glob("*.jsonl"),
+                                         key=lambda p: p.stat().st_mtime, reverse=True)
+                    if transcripts:
+                        # Append to the latest transcript
+                        import time
+                        from datetime import datetime
+                        entry = {
+                            "type": "orchestrator_state",
+                            "num_workers": len(self._workers),
+                            "active_workers": [{"id": w["id"], "name": w["name"],
+                                                "task_ids": w["task_ids"], "status": w["status"],
+                                                "worktree_path": w["worktree_path"],
+                                                "branch": w["branch"]}
+                                               for w in registry["workers"].values()],
+                            "next_worker_id": self._next_worker_id,
+                            "timestamp": datetime.now().isoformat(),
+                        }
+                        with open(transcripts[0], "a", encoding="utf-8") as f:
+                            f.write(json.dumps(entry, ensure_ascii=False, default=str) + "\n")
+                            f.flush()
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def _load_worker_registry(self) -> dict:
+        """Load worker registry from disk, falling back to transcript if missing."""
+        # Try registry file first (fast path)
+        if self._registry_path.exists():
+            try:
+                data = json.loads(self._registry_path.read_text(encoding="utf-8"))
+                if data.get("workers"):
+                    return data
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        # Fallback: rebuild from transcript (single source of truth)
+        try:
+            from services.transcript import TranscriptReader
+            transcript_dir = self.project_dir / ".swarmweaver" / "transcripts"
+            if transcript_dir.is_dir():
+                transcripts = sorted(transcript_dir.glob("*.jsonl"),
+                                     key=lambda p: p.stat().st_mtime, reverse=True)
+                if transcripts:
+                    entries = TranscriptReader.load_transcript(transcripts[0])
+                    info = TranscriptReader.detect_interruption(entries)
+                    workers = info.get("workers", {})
+                    if workers:
+                        # Rebuild registry from transcript
+                        max_id = max(workers.keys()) if workers else 0
+                        return {
+                            "next_worker_id": max_id + 1,
+                            "workers": {str(k): v for k, v in workers.items()},
+                        }
+        except Exception:
+            pass
+
+        return {}
+
     def _on_watchdog_event(self, event: dict) -> None:
         """Forward watchdog events to the main on_event callback."""
         import asyncio as _aio
@@ -485,16 +573,76 @@ class SmartOrchestrator:
                 )
                 print("[ORCHESTRATOR] LSP health loop started", flush=True)
 
-            # Analyse tasks
+            # ── RESUME: recover state from previous workers BEFORE loading tasks ──
+            registry = self._load_worker_registry()
+            _is_resume = bool(registry and registry.get("workers"))
+
+            if _is_resume:
+                self._next_worker_id = registry.get("next_worker_id", 1)
+                print(f"[ORCHESTRATOR] RESUME detected — {len(registry['workers'])} previous workers found", flush=True)
+
+                # Step 1: Merge each worker's git branch into main (code changes)
+                for wid_str, wdata in registry["workers"].items():
+                    branch = wdata.get("branch", f"swarm/worker-{wid_str}")
+                    name = wdata.get("name", f"worker-{wid_str}")
+                    try:
+                        self._git("merge", branch, "--no-edit", "--no-ff")
+                        print(f"[ORCHESTRATOR] Merged git branch from {name}", flush=True)
+                    except Exception as e:
+                        # Merge conflict or branch doesn't exist — try fast-forward
+                        try:
+                            self._git("merge", branch, "--no-edit")
+                            print(f"[ORCHESTRATOR] Fast-forward merged {name}", flush=True)
+                        except Exception:
+                            print(f"[ORCHESTRATOR] Could not merge {name} ({branch}): {e}", flush=True)
+
+                # Step 2: Sync task_list.json from worker worktrees into main
+                # Workers write task_list.json to their worktrees, not main.
+                # We need to collect task statuses from all worktrees.
+                main_tl = TaskList(self.project_dir)
+                main_tl.load()
+                merged_statuses = 0
+
+                for wid_str, wdata in registry["workers"].items():
+                    wt_path = Path(wdata.get("worktree_path", ""))
+                    wt_task_file = wt_path / ".swarmweaver" / "task_list.json"
+                    if wt_task_file.exists():
+                        try:
+                            worker_tl = TaskList(wt_path)
+                            worker_tl.load()
+                            # Merge: if worker says a task is "done", update main
+                            for wtask in (worker_tl.tasks if hasattr(worker_tl, "tasks") else []):
+                                task_id = getattr(wtask, "id", None) or getattr(wtask, "task_id", None)
+                                task_status = getattr(wtask, "status", None)
+                                if task_id and task_status in ("done", "verified"):
+                                    for mtask in (main_tl.tasks if hasattr(main_tl, "tasks") else []):
+                                        mid = getattr(mtask, "id", None) or getattr(mtask, "task_id", None)
+                                        if mid == task_id and getattr(mtask, "status", "") != task_status:
+                                            mtask.status = task_status
+                                            merged_statuses += 1
+                        except Exception as e:
+                            print(f"[ORCHESTRATOR] Could not read tasks from {wt_path}: {e}", flush=True)
+
+                if merged_statuses > 0:
+                    main_tl.save()
+                    print(f"[ORCHESTRATOR] Synced {merged_statuses} task statuses from worker worktrees to main", flush=True)
+
+            # ── NOW load tasks (after merge, so we see the real state) ──
             tl = TaskList(self.project_dir)
             tl.load()
-            print(f"[ORCHESTRATOR] Loaded {len(tl.tasks)} tasks from {self.project_dir}", flush=True)
+
+            done_count = sum(1 for t in (tl.tasks if hasattr(tl, "tasks") else [])
+                            if getattr(t, "status", "") in ("done", "verified"))
+            total_count = len(tl.tasks if hasattr(tl, "tasks") else [])
+            pending_count = total_count - done_count
+            print(f"[ORCHESTRATOR] Tasks: {done_count} done, {pending_count} pending, {total_count} total", flush=True)
+
             analysis = TaskComplexityAnalyzer().analyze(tl, self.max_workers)
             print(f"[ORCHESTRATOR] Analysis: {analysis['recommended_workers']} workers recommended — {analysis['reasoning']}", flush=True)
             await self.emit({"type": "orchestrator_analysis", "data": analysis})
 
             if analysis["recommended_workers"] == 0:
-                print("[ORCHESTRATOR] No tasks to run. Completing.", flush=True)
+                print("[ORCHESTRATOR] No pending tasks. Completing.", flush=True)
                 await self.emit({"type": "status", "data": "completed"})
                 return
 
@@ -887,9 +1035,30 @@ class SmartOrchestrator:
         worktree_path = swarm_dir / name
 
         try:
-            # Remove stale worktree/branch if exists
-            if worktree_path.exists():
-                self._git("worktree", "remove", "--force", str(worktree_path))
+            # Only remove worktree if it's not from a recent run (check registry)
+            registry = self._load_worker_registry()
+            existing_workers = registry.get("workers", {}) if registry else {}
+            worktree_in_registry = any(
+                w.get("worktree_path") == str(worktree_path)
+                for w in existing_workers.values()
+            )
+
+            if worktree_path.exists() and not worktree_in_registry:
+                # Stale worktree from a previous unregistered run - safe to remove
+                try:
+                    self._git("worktree", "remove", "--force", str(worktree_path))
+                except Exception:
+                    pass
+            elif worktree_path.exists() and worktree_in_registry:
+                # Worktree from a registered worker - merge its changes first
+                try:
+                    self._git("merge", branch, "--no-edit", "--no-ff")
+                except Exception:
+                    pass
+                try:
+                    self._git("worktree", "remove", "--force", str(worktree_path))
+                except Exception:
+                    pass
             self._git("branch", "-D", branch)
 
             ok, output = self._git(
@@ -1344,6 +1513,7 @@ class SmartOrchestrator:
                     handle.status = "completed"
                     handle.completed_at = datetime.utcnow().isoformat() + "Z"
                     self._consecutive_spawn_failures = 0
+                    self._save_worker_registry()
                     self._mail.send(
                         sender=name, recipient="orchestrator",
                         msg_type=MessageType.WORKER_DONE.value,
@@ -1356,6 +1526,7 @@ class SmartOrchestrator:
                     handle.status = "error"
                     handle.completed_at = datetime.utcnow().isoformat() + "Z"
                     self._consecutive_spawn_failures += 1
+                    self._save_worker_registry()
                     # Reset assigned tasks to pending so orchestrator can reassign
                     try:
                         tl = TaskList(self.project_dir)
@@ -1384,6 +1555,7 @@ class SmartOrchestrator:
                     handle.status = "error"
                     handle.completed_at = datetime.utcnow().isoformat() + "Z"
                     self._consecutive_spawn_failures += 1
+                    self._save_worker_registry()
                     # Reset assigned tasks to pending so orchestrator can reassign
                     try:
                         tl = TaskList(self.project_dir)
@@ -1410,6 +1582,7 @@ class SmartOrchestrator:
                     handle.status = "error"
                     handle.completed_at = datetime.utcnow().isoformat() + "Z"
                     self._consecutive_spawn_failures += 1
+                    self._save_worker_registry()
                     # Reset assigned tasks to pending so orchestrator can reassign
                     try:
                         tl = TaskList(self.project_dir)
@@ -1453,6 +1626,7 @@ class SmartOrchestrator:
             started_at=datetime.utcnow().isoformat() + "Z",
         )
         self._workers[worker_id] = handle
+        self._save_worker_registry()
 
         # Register worker with enhanced watchdog (W4-4)
         if self._watchdog:
@@ -2304,26 +2478,63 @@ class SmartOrchestrator:
                 )
 
         # Detect resume: check for already-completed tasks
-        done_tasks = [t for t in tl.tasks if t.status in ("done", "completed")]
+        done_tasks = [t for t in tl.tasks if t.status in ("done", "completed", "verified")]
+        pending_tasks = [t for t in tl.tasks if t.status in ("pending", "in_progress", "blocked")]
         is_resume = len(done_tasks) > 0
         resume_section = ""
         if is_resume:
-            done_ids = [t.id for t in done_tasks]
-            resume_section = f"""
-## RESUME SESSION
-This is a RESUMED run. {len(done_tasks)} task(s) were completed in a previous session:
-  {', '.join(done_ids)}
+            # Build a very explicit resume section
+            resume_lines = []
+            resume_lines.append("## !! RESUME SESSION — READ THIS FIRST !!")
+            resume_lines.append("")
+            resume_lines.append(f"This is a RESUMED run. {len(done_tasks)} of {len(tl.tasks)} tasks are ALREADY COMPLETE.")
+            resume_lines.append("Their code has been merged into the main branch.")
+            resume_lines.append("")
+            resume_lines.append("### COMPLETED TASKS (DO NOT reassign, DO NOT redo)")
+            for t in done_tasks:
+                resume_lines.append(f"  - {t.id}: {t.title} [STATUS: {t.status}]")
+            resume_lines.append("")
+            resume_lines.append(f"### REMAINING TASKS ({len(pending_tasks)} tasks need workers)")
+            for t in pending_tasks:
+                deps = ", ".join(t.dependencies) if hasattr(t, "dependencies") and t.dependencies else "none"
+                resume_lines.append(f"  - {t.id}: {t.title} [STATUS: {t.status}] deps: {deps}")
+            resume_lines.append("")
 
-These tasks are ALREADY DONE — do NOT re-assign them. Their code is already merged into the main branch.
-Only assign the REMAINING pending tasks listed below to workers.
-"""
-            # Include lessons from previous run
-            lessons = self._load_lessons()
-            lesson_entries = lessons.get("lessons", [])
-            if lesson_entries:
-                resume_section += f"\n## Lessons from Previous Run ({len(lesson_entries)} entries)\n"
-                for le in lesson_entries[-10:]:  # last 10 lessons
-                    resume_section += f"  - {le.get('lesson', '')}\n"
+            # Previous workers info
+            registry = self._load_worker_registry()
+            if registry and registry.get("workers"):
+                resume_lines.append("### PREVIOUS WORKERS (already ran)")
+                for wid_str, wdata in registry["workers"].items():
+                    name = wdata.get("name", f"worker-{wid_str}")
+                    task_ids = wdata.get("task_ids", [])
+                    status = wdata.get("status", "unknown")
+                    resume_lines.append(f"  - {name}: assigned {task_ids}, status={status}")
+                resume_lines.append("")
+
+            resume_lines.append("### YOUR ACTION")
+            if pending_tasks:
+                pending_ids = [t.id for t in pending_tasks]
+                resume_lines.append(f"Spawn workers ONLY for these pending tasks: {', '.join(pending_ids)}")
+                resume_lines.append("Do NOT create workers for completed tasks.")
+                resume_lines.append(f"Use worker IDs starting from {self._next_worker_id}.")
+            else:
+                resume_lines.append("ALL tasks are complete. Report completion.")
+            resume_lines.append("")
+
+            # MELS lessons
+            try:
+                if self._expertise_store and self._lesson_synth:
+                    lesson_entries = self._expertise_store.get_session_lessons(
+                        self._lesson_synth._session_id
+                    )
+                    if lesson_entries:
+                        resume_lines.append(f"### Lessons from Previous Run ({len(lesson_entries)} entries)")
+                        for le in lesson_entries[-10:]:
+                            resume_lines.append(f"  - {getattr(le, 'content', '')}")
+            except Exception:
+                pass
+
+            resume_section = "\n".join(resume_lines)
 
         file_groups_text = []
         for i, fg in enumerate(analysis.get("file_groups", []), 1):
@@ -2649,7 +2860,7 @@ spawn new workers for remaining tasks, and call signal_complete when all done.""
         #    (mail.db, merge_queue.db, etc. are needed if user resumes)
         swarm_dir = get_paths(self.project_dir).swarm_dir
         if swarm_dir.exists():
-            _preserve = {"mail.db", "merge_queue.db", "merge_history.json"}
+            _preserve = {"mail.db", "merge_queue.db", "merge_history.json", "worker_registry.json"}
 
             def _selective_cleanup(sd=swarm_dir):
                 for child in sd.iterdir():

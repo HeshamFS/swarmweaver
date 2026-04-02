@@ -217,6 +217,31 @@ async def _ws_run_native(
     else:
         print(f"[ws/run] [NATIVE] Creating Engine: mode={mode}, model={model}, project_dir={project_dir}", flush=True)
         print(f"[ws/run] [NATIVE] Options: budget={config.get('budget', 0)}, max_hours={config.get('max_hours', 0)}, approval_gates={config.get('approval_gates', False)}, resume={not no_resume}", flush=True)
+
+        # Auto-initialize LSP manager for this project (if not already registered)
+        _run_lsp_manager = None
+        try:
+            from api.state import get_lsp_manager, set_lsp_manager
+            if not get_lsp_manager(original_project_dir):
+                from services.lsp_manager import LSPManager, LSPConfig
+                lsp_config = LSPConfig.load(Path(original_project_dir))
+                if lsp_config.enabled:
+                    _run_lsp_manager = LSPManager(original_project_dir, lsp_config, on_event=on_event)
+                    set_lsp_manager(original_project_dir, _run_lsp_manager)
+                    _run_lsp_manager.start_health_loop()
+                    # Auto-detect and start servers for project languages
+                    try:
+                        started = await _run_lsp_manager.auto_detect_and_start()
+                        if started:
+                            print(f"[ws/run] LSP auto-started: {', '.join(started)}", flush=True)
+                    except Exception as _lsp_e:
+                        print(f"[ws/run] LSP auto-detect failed: {_lsp_e}", flush=True)
+                    print(f"[ws/run] LSP manager auto-initialized for {original_project_dir}", flush=True)
+            else:
+                _run_lsp_manager = get_lsp_manager(original_project_dir)
+        except Exception as e:
+            print(f"[ws/run] LSP auto-init skipped (non-fatal): {e}", flush=True)
+
         engine = Engine(
             project_dir=project_dir,
             mode=mode,
@@ -231,6 +256,7 @@ async def _ws_run_native(
             auto_pr=config.get("auto_pr", False),
             phase_models=config.get("phase_models"),
             on_event=on_event,
+            lsp_manager=_run_lsp_manager,
         )
 
     _running_engines[proc_key] = engine

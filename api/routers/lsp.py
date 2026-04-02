@@ -11,11 +11,31 @@ router = APIRouter()
 async def lsp_status(
     path: str = Query(..., description="Project directory"),
 ):
-    """Get status of all LSP servers."""
-    from api.state import get_lsp_manager
+    """Get status of all LSP servers. Auto-initializes and auto-detects if needed."""
+    from api.state import get_lsp_manager, set_lsp_manager
     manager = get_lsp_manager(path)
     if not manager:
-        return {"servers": [], "message": "LSP not initialized"}
+        # Lazy auto-initialization + auto-detect languages
+        try:
+            from pathlib import Path as P
+            from services.lsp_manager import LSPManager, LSPConfig
+            lsp_config = LSPConfig.load(P(path))
+            if lsp_config.enabled:
+                manager = LSPManager(path, lsp_config)
+                set_lsp_manager(path, manager)
+                manager.start_health_loop()
+                # Auto-detect and start servers for project languages
+                import asyncio
+                try:
+                    started = await manager.auto_detect_and_start()
+                    if started:
+                        print(f"[LSP] Auto-started servers for: {', '.join(started)}", flush=True)
+                except Exception as e:
+                    print(f"[LSP] Auto-detect failed (non-fatal): {e}", flush=True)
+        except Exception:
+            pass
+    if not manager:
+        return {"servers": [], "message": "LSP not available"}
 
     instances = manager.get_all_instances()
     return {
@@ -341,6 +361,42 @@ async def lsp_restart_server(
         }
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+@router.post("/api/lsp/auto-detect")
+async def lsp_auto_detect(
+    path: str = Query(..., description="Project directory"),
+):
+    """Auto-detect project languages and install+start LSP servers."""
+    from api.state import get_lsp_manager, set_lsp_manager
+    manager = get_lsp_manager(path)
+    if not manager:
+        try:
+            from services.lsp_manager import LSPManager, LSPConfig
+            lsp_config = LSPConfig.load(Path(path))
+            manager = LSPManager(path, lsp_config)
+            set_lsp_manager(path, manager)
+            manager.start_health_loop()
+        except Exception as e:
+            return {"error": f"Failed to initialize LSP: {e}"}
+
+    try:
+        started = await manager.auto_detect_and_start()
+        instances = manager.get_all_instances()
+        return {
+            "started": started,
+            "total_servers": len(instances),
+            "servers": [
+                {
+                    "language_id": inst.spec.language_id,
+                    "server_name": inst.spec.server_name,
+                    "status": inst.status.value,
+                }
+                for inst in instances
+            ],
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 
 @router.get("/api/lsp/config")
