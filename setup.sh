@@ -31,6 +31,33 @@ echo
 echo "Syncing dependencies..."
 uv sync
 
+# ── Install LSP language servers ──────────────────────────────────
+echo "Installing LSP language servers..."
+if command -v npm &> /dev/null; then
+    for server in typescript-language-server pyright vscode-html-language-server; do
+        if ! command -v "$server" &> /dev/null; then
+            echo "  Installing $server..."
+            case "$server" in
+                typescript-language-server)
+                    npm install -g typescript-language-server typescript 2>/dev/null || true
+                    ;;
+                pyright)
+                    npm install -g pyright 2>/dev/null || true
+                    ;;
+                vscode-html-language-server)
+                    npm install -g vscode-langservers-extracted 2>/dev/null || true
+                    ;;
+            esac
+        else
+            echo "  $server — already installed"
+        fi
+    done
+    echo "LSP servers ready."
+else
+    echo "  npm not found — skipping LSP server installation"
+    echo "  Install Node.js and run: npm install -g typescript-language-server typescript pyright vscode-langservers-extracted"
+fi
+
 echo
 echo "=================================="
 echo "  Setup Complete!"

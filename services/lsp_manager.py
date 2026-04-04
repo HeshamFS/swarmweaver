@@ -828,6 +828,74 @@ class LSPManager:
 
         self._build_spec_index()
 
+    # ── Auto-detect & start ──────────────────────────────────────────────
+
+    async def auto_detect_and_start(self) -> list[str]:
+        """Scan project for source files and auto-start servers for detected languages.
+
+        Returns list of language_ids for which servers were started.
+        """
+        if not self.config.auto_detect:
+            return []
+
+        import os
+
+        # Scan project for file extensions (skip node_modules, .git, dist, etc.)
+        skip_dirs = {
+            "node_modules", ".git", ".swarmweaver", "dist", "build", "__pycache__",
+            ".next", ".venv", "venv", ".tox", "target", "vendor",
+        }
+        detected_langs: set[str] = set()
+
+        try:
+            for root, dirs, files in os.walk(self.project_dir):
+                # Prune ignored directories
+                dirs[:] = [d for d in dirs if d not in skip_dirs]
+                for fname in files:
+                    ext = os.path.splitext(fname)[1]
+                    if ext:
+                        lang = EXTENSION_TO_LANGUAGE.get(ext)
+                        if lang and lang in self._spec_index:
+                            detected_langs.add(lang)
+                # Stop scanning after 500 files to avoid slow projects
+                if sum(1 for _ in []) > 500:
+                    break
+        except OSError:
+            pass
+
+        # Deduplicate: typescript and typescriptreact use the same server
+        started: list[str] = []
+        started_servers: set[str] = set()
+        for lang in sorted(detected_langs):
+            spec = self._resolve_spec(lang, self.project_dir)
+            if spec and spec.server_name not in started_servers:
+                try:
+                    # Auto-install if binary not found and auto_install enabled
+                    if self.config.auto_install and spec.install_command:
+                        import shutil
+                        if not shutil.which(spec.command):
+                            logger.info("Binary '%s' not found, attempting auto-install...", spec.command)
+                            installed = await self.auto_install(spec)
+                            if not installed:
+                                logger.warning("Auto-install failed for %s, skipping", spec.server_name)
+                                continue
+
+                    instance = await self.ensure_server(lang, self.project_dir)
+                    if instance:
+                        started.append(lang)
+                        started_servers.add(spec.server_name)
+                        logger.info("Auto-started LSP: %s (%s)", spec.server_name, lang)
+                except Exception as exc:
+                    logger.warning("Failed to auto-start %s: %s", spec.server_name, exc)
+
+        if started:
+            self._emit_event("lsp_auto_detected", {
+                "languages": started,
+                "project": str(self.project_dir),
+            })
+
+        return started
+
     # ── Spec index ────────────────────────────────────────────────────────
 
     def _build_spec_index(self) -> None:

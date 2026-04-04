@@ -109,6 +109,50 @@ async function ensureFrontendDeps() {
   log(`${G}✓${R} Frontend dependencies installed`);
 }
 
+// ── Step 2.5: Install LSP servers if missing ────────────────────
+
+async function ensureLspServers() {
+  const { execSync: execS } = await import("child_process");
+
+  // Core LSP servers needed for code intelligence
+  const servers = [
+    { check: "typescript-language-server", install: "npm install -g typescript-language-server typescript" },
+    { check: "vscode-html-language-server", install: "npm install -g vscode-langservers-extracted" },
+    { check: "pyright", install: "npm install -g pyright" },
+  ];
+
+  let needsInstall = false;
+  for (const s of servers) {
+    try {
+      execS(isWin ? `where ${s.check}` : `which ${s.check}`, { stdio: "ignore" });
+    } catch {
+      needsInstall = true;
+      break;
+    }
+  }
+
+  if (!needsInstall) {
+    log(`${G}✓${R} LSP servers installed`);
+    return;
+  }
+
+  log("Installing LSP language servers (one-time setup)...");
+  for (const s of servers) {
+    try {
+      execS(isWin ? `where ${s.check}` : `which ${s.check}`, { stdio: "ignore" });
+      log(`  ${DIM}${s.check} — already installed${R}`);
+    } catch {
+      log(`  Installing ${s.check}...`);
+      try {
+        execS(s.install, { stdio: "inherit", timeout: 120_000 });
+        log(`  ${G}✓${R} ${s.check} installed`);
+      } catch (e) {
+        log(`  ${RED}✗ Failed to install ${s.check} (non-fatal)${R}`);
+      }
+    }
+  }
+}
+
 // ── Step 3: Launch servers ───────────────────────────────────────
 
 const procs = [];
@@ -184,6 +228,7 @@ async function main() {
   try {
     await ensurePythonDeps(uvCmd);
     await ensureFrontendDeps();
+    await ensureLspServers();
   } catch (err) {
     console.error(`\n${RED}Setup failed:${R} ${err.message}`);
     process.exit(1);
