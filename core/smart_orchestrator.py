@@ -504,6 +504,97 @@ class SmartOrchestrator:
 
         return {}
 
+    async def _restart_worker(
+        self, worker_id: int, name: str, worktree_path: Path,
+        branch: str, task_ids: list[str],
+    ) -> None:
+        """Restart an interrupted worker in its existing worktree.
+
+        Unlike _tool_spawn_worker which creates a new worktree, this reuses
+        the existing one — preserving uncommitted work from the interrupted session.
+        """
+        from core.engine import Engine
+
+        file_scope = []
+        for tid in task_ids:
+            for t in TaskList(self.project_dir).load() or []:
+                pass
+        # Reuse the same engine creation pattern as _tool_spawn_worker
+        # but skip worktree creation (it already exists)
+        role = "builder"
+
+        async def _on_worker_event(event: dict) -> None:
+            event["worker_id"] = worker_id
+            event["worker_name"] = name
+            await self.emit(event)
+
+        engine = Engine(
+            project_dir=str(worktree_path),
+            mode=self.mode,
+            model=self.model,
+            task_input=self.task_input,
+            resume=True,
+            on_event=_on_worker_event,
+            task_scope=task_ids,
+            worker_id=worker_id,
+            task_list_dir=self.project_dir,
+            mail_project_dir=self.project_dir,
+            max_budget_usd=2.0,
+            max_turns=200,
+        )
+
+        async def _run_restarted_engine():
+            try:
+                await engine.run()
+                handle = self._workers.get(worker_id)
+                if handle:
+                    handle.status = "completed"
+                    handle.completed_at = datetime.utcnow().isoformat() + "Z"
+                    self._save_worker_registry()
+                    self._mail.send(
+                        sender=name, recipient="orchestrator",
+                        msg_type=MessageType.REPORT.value,
+                        subject=f"Worker {name} (restarted) completed",
+                        body=f"Tasks: {task_ids}",
+                    )
+                    print(f"[ORCHESTRATOR] Restarted {name} completed successfully", flush=True)
+            except Exception as e:
+                handle = self._workers.get(worker_id)
+                if handle:
+                    handle.status = "error"
+                    handle.completed_at = datetime.utcnow().isoformat() + "Z"
+                    self._save_worker_registry()
+                print(f"[ORCHESTRATOR] Restarted {name} failed: {e}", flush=True)
+
+        atask = asyncio.create_task(_run_restarted_engine())
+
+        handle = WorkerHandle(
+            worker_id=worker_id,
+            name=name,
+            engine=engine,
+            task=atask,
+            worktree_path=str(worktree_path),
+            branch_name=branch,
+            assigned_task_ids=task_ids,
+            file_scope=file_scope,
+            role=role,
+            status="running",
+            started_at=datetime.utcnow().isoformat() + "Z",
+        )
+        self._workers[worker_id] = handle
+        self._save_worker_registry()
+
+        await self.emit({
+            "type": "worker_restarted",
+            "data": {
+                "worker_id": worker_id,
+                "name": name,
+                "task_ids": task_ids,
+                "worktree_path": str(worktree_path),
+            },
+        })
+        print(f"[ORCHESTRATOR] {name} restarted in existing worktree {worktree_path}", flush=True)
+
     def _on_watchdog_event(self, event: dict) -> None:
         """Forward watchdog events to the main on_event callback."""
         import asyncio as _aio
@@ -660,23 +751,90 @@ class SmartOrchestrator:
                 await self.emit({"type": "status", "data": "completed"})
                 return
 
+            # ── RESUME: Restart interrupted workers in their existing worktrees ──
+            if _is_resume and registry.get("workers"):
+                pending_task_ids = set(
+                    t.id for t in tl.tasks
+                    if getattr(t, "status", "") in ("pending", "in_progress", "blocked")
+                )
+                for wid_str, wdata in registry["workers"].items():
+                    wid = int(wid_str)
+                    status = wdata.get("status", "")
+                    wt_path = Path(wdata.get("worktree_path", ""))
+                    worker_task_ids = wdata.get("task_ids", [])
+
+                    # Find which of this worker's tasks are still pending
+                    remaining = [tid for tid in worker_task_ids if tid in pending_task_ids]
+
+                    if remaining and wt_path.exists() and status in ("running", "starting"):
+                        # This worker was interrupted mid-run — restart it
+                        name = wdata.get("name", f"worker-{wid}")
+                        branch = wdata.get("branch", f"swarm/worker-{wid}")
+                        print(f"[ORCHESTRATOR] RESTARTING {name} in existing worktree for {remaining}", flush=True)
+
+                        # Remove these tasks from the pending set so the orchestrator
+                        # doesn't also assign them to a new worker
+                        for tid in remaining:
+                            pending_task_ids.discard(tid)
+
+                        try:
+                            await self._restart_worker(wid, name, wt_path, branch, remaining)
+                        except Exception as e:
+                            print(f"[ORCHESTRATOR] Failed to restart {name}: {e}", flush=True)
+                            # Put tasks back so orchestrator can reassign
+                            for tid in remaining:
+                                pending_task_ids.add(tid)
+
+                # Update task list for orchestrator prompt — mark restarted tasks
+                # so the orchestrator knows they're already being handled
+                if self._workers:
+                    assigned_ids = set()
+                    for h in self._workers.values():
+                        assigned_ids.update(getattr(h, "assigned_task_ids", []))
+                    if assigned_ids:
+                        print(f"[ORCHESTRATOR] {len(self._workers)} workers restarted, handling {len(assigned_ids)} tasks", flush=True)
+
             # Create orchestrator agent client
             print(f"[ORCHESTRATOR] Creating tool server and Opus client...", flush=True)
             tool_server = create_orchestrator_tool_server(self)
 
             initial_prompt = self._build_initial_prompt(tl, analysis)
 
+            # Try to resume orchestrator's own SDK session
+            _orch_session_file = self.project_dir / ".swarmweaver" / "orchestrator_session.json"
+            _orch_resume_id = None
+            if _is_resume and _orch_session_file.exists():
+                try:
+                    _orch_data = json.loads(_orch_session_file.read_text(encoding="utf-8"))
+                    _orch_resume_id = _orch_data.get("session_id")
+                    if _orch_resume_id:
+                        print(f"[ORCHESTRATOR] Will attempt to resume SDK session: {_orch_resume_id[:16]}...", flush=True)
+                except (json.JSONDecodeError, OSError):
+                    pass
+
             print(f"[ORCHESTRATOR] Sending initial prompt ({len(initial_prompt)} chars) to Opus...", flush=True)
             max_retries = 2
             for attempt in range(max_retries + 1):
                 try:
-                    client = self._create_orchestrator_client(tool_server)
+                    client = self._create_orchestrator_client(tool_server, _orch_resume_id)
                     self._current_client = client
                     async with client:
                         # Single continuous query — the orchestrator stays connected
                         # and uses wait_seconds() to pace itself between monitoring checks.
                         # Worker events continue streaming to the frontend during waits.
                         await client.query(initial_prompt)
+                        # Save orchestrator session ID for resume
+                        try:
+                            _sid = getattr(client, "session_id", None) or getattr(client, "_session_id", None)
+                            if _sid:
+                                _orch_session_file.parent.mkdir(parents=True, exist_ok=True)
+                                _orch_session_file.write_text(
+                                    json.dumps({"session_id": _sid, "timestamp": datetime.utcnow().isoformat()}),
+                                    encoding="utf-8",
+                                )
+                                print(f"[ORCHESTRATOR] Saved session ID: {str(_sid)[:16]}...", flush=True)
+                        except Exception:
+                            pass
                         print("[ORCHESTRATOR] Waiting for Opus response...", flush=True)
                         await self._process_response(client)
                         print(f"[ORCHESTRATOR] Session done. Workers: {len(self._workers)}, Complete: {self._complete}", flush=True)
@@ -750,10 +908,10 @@ class SmartOrchestrator:
     # SDK Client Creation
     # ------------------------------------------------------------------
 
-    def _create_orchestrator_client(self, tool_server) -> ClaudeSDKClient:
+    def _create_orchestrator_client(self, tool_server, resume_session_id=None) -> ClaudeSDKClient:
         """Create a ClaudeSDKClient configured for the orchestrator agent."""
         from core.client import create_orchestrator_client
-        return create_orchestrator_client(self.project_dir, tool_server)
+        return create_orchestrator_client(self.project_dir, tool_server, resume_session_id=resume_session_id)
 
     # ------------------------------------------------------------------
     # Response Processing
@@ -2526,12 +2684,30 @@ class SmartOrchestrator:
                     resume_lines.append(f"  - {name}: assigned {task_ids}, status={status}")
                 resume_lines.append("")
 
+            # Show restarted workers (already running from resume)
+            if self._workers:
+                resume_lines.append("### RESTARTED WORKERS (already running — DO NOT reassign their tasks)")
+                for wid, handle in self._workers.items():
+                    tids = list(getattr(handle, "assigned_task_ids", []))
+                    resume_lines.append(f"  - {handle.name}: RUNNING, handling {tids}")
+                resume_lines.append("")
+
             resume_lines.append("### YOUR ACTION")
-            if pending_tasks:
-                pending_ids = [t.id for t in pending_tasks]
-                resume_lines.append(f"Spawn workers ONLY for these pending tasks: {', '.join(pending_ids)}")
-                resume_lines.append("Do NOT create workers for completed tasks.")
+            # Calculate truly unassigned pending tasks
+            assigned_task_ids = set()
+            for h in self._workers.values():
+                assigned_task_ids.update(getattr(h, "assigned_task_ids", []))
+
+            unassigned_pending = [t for t in pending_tasks if t.id not in assigned_task_ids]
+
+            if unassigned_pending:
+                unassigned_ids = [t.id for t in unassigned_pending]
+                resume_lines.append(f"Spawn workers ONLY for these UNASSIGNED tasks: {', '.join(unassigned_ids)}")
+                resume_lines.append("Do NOT create workers for completed tasks or tasks already handled by restarted workers.")
                 resume_lines.append(f"Use worker IDs starting from {self._next_worker_id}.")
+            elif self._workers:
+                resume_lines.append("All pending tasks are already being handled by restarted workers.")
+                resume_lines.append("Monitor their progress. Only spawn new workers if they fail.")
             else:
                 resume_lines.append("ALL tasks are complete. Report completion.")
             resume_lines.append("")

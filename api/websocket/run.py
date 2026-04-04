@@ -528,6 +528,35 @@ async def ws_run(websocket: WebSocket):
         except Exception:
             pass
 
+        # --- Replay previous activity log for resume (chat history) ---
+        if not no_resume:
+            try:
+                _replay_paths = get_paths(Path(original_project_dir))
+                _replay_file = _replay_paths.activity_log
+                if _replay_file.exists():
+                    _replay_count = 0
+                    with open(_replay_file, "r", encoding="utf-8") as _rf:
+                        for _line in _rf:
+                            _line = _line.strip()
+                            if not _line:
+                                continue
+                            try:
+                                _evt = json.loads(_line)
+                                # Mark as replay so frontend can style differently
+                                _evt["_replay"] = True
+                                await websocket.send_json(_evt)
+                                _replay_count += 1
+                            except (json.JSONDecodeError, Exception):
+                                continue
+                    if _replay_count > 0:
+                        await websocket.send_json({
+                            "type": "replay_complete",
+                            "data": {"events_replayed": _replay_count},
+                        })
+                        print(f"[ws/run] Replayed {_replay_count} events from activity log", flush=True)
+            except Exception as _re:
+                print(f"[ws/run] Activity log replay failed (non-fatal): {_re}", flush=True)
+
         # --- SDK execution path ---
         print(f"[ws/run] Running {mode} in-process via Engine (SDK streaming)", flush=True)
         await _ws_run_native(

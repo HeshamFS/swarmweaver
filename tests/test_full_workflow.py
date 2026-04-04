@@ -42,8 +42,13 @@ def test_full_workflow():
     project.mkdir(parents=True)
 
     # Init git
-    os.system(f'cd "{project}" && git init -q && git config user.email dev@test.com && git config user.name Dev')
-    os.system(f'cd "{project}" && echo "# Todo App" > README.md && git add -A && git commit -q -m "init"')
+    import subprocess
+    subprocess.run(["git", "init", "-q"], cwd=str(project), capture_output=True)
+    subprocess.run(["git", "config", "user.email", "dev@test.com"], cwd=str(project), capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Dev"], cwd=str(project), capture_output=True)
+    (project / "README.md").write_text("# Todo App\n")
+    subprocess.run(["git", "add", "-A"], cwd=str(project), capture_output=True)
+    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=str(project), capture_output=True)
 
     print(f"  Project: {project}")
     assert (project / ".git").is_dir(), "Git not initialized"
@@ -151,7 +156,7 @@ def test_full_workflow():
     # Simulate orchestrator creating worker-1
     w1_path = sw / "swarm" / "worker-1"
     w1_path.mkdir(parents=True)
-    os.system(f'cd "{project}" && git branch swarm/worker-1 2>/dev/null')
+    subprocess.run(["git", "branch", "swarm/worker-1"], cwd=str(project), capture_output=True)
 
     # Worker-1 completes tasks 1-3 (writes to MAIN task_list per our fix)
     tl = TaskList(project)
@@ -463,7 +468,7 @@ def test_full_workflow():
         if gt.exists():
             gt.unlink()
 
-    shutil.rmtree(project.parent)
+    shutil.rmtree(project.parent, ignore_errors=True)
 
     # ══════════════════════════════════════════════════════════════════
     # FINAL SUMMARY
