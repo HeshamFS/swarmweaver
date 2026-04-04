@@ -61,9 +61,6 @@ class ProjectPaths:
             # rules/ directory
             (self.swarmweaver_dir / "rules").mkdir(exist_ok=True)
 
-            # transcripts/ directory
-            (self.swarmweaver_dir / "transcripts").mkdir(exist_ok=True)
-
             # Also ensure global memory exists (once)
             _ensure_global_memory()
         except OSError:

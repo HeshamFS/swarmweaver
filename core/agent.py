@@ -195,41 +195,6 @@ def prepare_agent_context(
     task_list = TaskList(project_dir)
     task_list.load()
 
-    # Check for interrupted sessions via transcript and inject resume context
-    if resume:
-        try:
-            from services.transcript import TranscriptReader
-            transcript_dir = project_dir / ".swarmweaver" / "transcripts"
-            if transcript_dir.is_dir():
-                transcripts = sorted(
-                    transcript_dir.glob("*.jsonl"),
-                    key=lambda p: p.stat().st_mtime,
-                    reverse=True,
-                )
-                if transcripts:
-                    latest = TranscriptReader.load_transcript(transcripts[0])
-                    info = TranscriptReader.detect_interruption(latest)
-                    if info.get("interrupted"):
-                        resume_context = TranscriptReader.build_resume_context(latest)
-                        _print(f"[RESUME] Detected interrupted session (turn {info['last_turn']}, phase: {info['last_phase']})")
-                        _print(f"[RESUME] Tasks: {info['tasks_done']}/{info['tasks_total']} done")
-                        if info.get("progress_summary"):
-                            _print(f"[RESUME] Last progress: {info['progress_summary'][:100]}")
-                        # Write resume context to claude-progress.txt so prompt template picks it up
-                        if resume_context:
-                            try:
-                                progress_file = paths.progress_notes
-                                existing_text = ""
-                                if progress_file.exists():
-                                    existing_text = progress_file.read_text(encoding="utf-8")
-                                if "Session Recovery Context" not in existing_text:
-                                    with open(progress_file, "a", encoding="utf-8") as f:
-                                        f.write(f"\n\n{resume_context}\n")
-                            except OSError:
-                                pass
-        except Exception:
-            pass
-
     # Phases
     phases = get_phases(effective_mode)
 

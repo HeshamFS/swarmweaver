@@ -12,7 +12,6 @@ from api.routers import session_history, snapshots, keybindings
 from api.routers import skills
 from api.routers import dream
 from api.routers import memory
-from api.routers import transcript
 from api.websocket import run as ws_run, wizard as ws_wizard
 
 
@@ -51,7 +50,6 @@ def create_app() -> FastAPI:
     app.include_router(skills.router)
     app.include_router(dream.router)
     app.include_router(memory.router)
-    app.include_router(transcript.router)
 
     # WebSocket routers
     app.include_router(ws_run.router)
