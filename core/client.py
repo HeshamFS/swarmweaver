@@ -421,6 +421,7 @@ DON'T GUESS - SEARCH! Web search is fast and free. Read docs before implementing
 def create_orchestrator_client(
     project_dir: Path,
     orchestrator_tool_server,
+    resume_session_id: Optional[str] = None,
 ) -> ClaudeSDKClient:
     """
     Create a Claude SDK client configured for the smart orchestrator agent.
@@ -519,6 +520,10 @@ def create_orchestrator_client(
 
     if settings_file:
         options_kwargs["settings"] = str(settings_file.resolve())
+
+    if resume_session_id:
+        options_kwargs["resume_session_id"] = resume_session_id
+        print(f"[ORCHESTRATOR] Resuming SDK session: {resume_session_id[:16]}...")
 
     print(f"[ORCHESTRATOR] Created client: model={ORCHESTRATOR_MODEL}, cwd={project_dir}")
     try:

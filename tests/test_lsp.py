@@ -1436,14 +1436,18 @@ class TestLSPAPI(unittest.IsolatedAsyncioTestCase):
     """Tests for api/routers/lsp.py"""
 
     async def test_get_status_no_manager(self):
-        """GET /api/lsp/status returns empty list when LSP not initialized."""
+        """GET /api/lsp/status returns empty list + 'not available' when LSP can't init."""
         from api.routers.lsp import lsp_status
 
-        with patch("api.state.get_lsp_manager", return_value=None):
+        # The endpoint attempts lazy auto-init. Mock LSPConfig.load to fail
+        # so no manager gets created and the endpoint returns the fallback response.
+        with patch("api.state.get_lsp_manager", return_value=None), \
+             patch("api.state.set_lsp_manager"), \
+             patch("services.lsp_manager.LSPConfig.load", side_effect=Exception("no config")):
             result = await lsp_status(path="/project")
 
         self.assertEqual(result["servers"], [])
-        self.assertIn("not initialized", result.get("message", ""))
+        self.assertIn("not available", result.get("message", ""))
 
     async def test_get_status_with_servers(self):
         """GET /api/lsp/status returns server list with details."""
