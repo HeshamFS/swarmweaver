@@ -1306,6 +1306,70 @@ class LSPManager:
         self._health_task = asyncio.create_task(self.run_health_loop())
         return self._health_task
 
+    async def auto_detect_and_start(self) -> list[str]:
+        """Scan project, detect languages, auto-install if needed, start servers.
+
+        Returns list of language_ids for which servers were started.
+        Deduplicates by server_name (e.g. typescript + typescriptreact → one server).
+        """
+        if not self.config.auto_detect:
+            return []
+
+        import os
+        import shutil
+        skip_dirs = {
+            "node_modules", ".git", ".swarmweaver", "dist", "build",
+            "__pycache__", ".next", ".venv", "venv", ".tox", "target", "vendor",
+        }
+        detected_langs: set[str] = set()
+        scanned = 0
+        try:
+            for root, dirs, files in os.walk(self.project_dir):
+                dirs[:] = [d for d in dirs if d not in skip_dirs]
+                for fname in files:
+                    scanned += 1
+                    if scanned > 2000:
+                        break
+                    ext = os.path.splitext(fname)[1]
+                    if ext:
+                        lang = EXTENSION_TO_LANGUAGE.get(ext)
+                        if lang and lang in self._spec_index:
+                            detected_langs.add(lang)
+                if scanned > 2000:
+                    break
+        except OSError:
+            pass
+
+        started: list[str] = []
+        started_servers: set[str] = set()
+        for lang in sorted(detected_langs):
+            spec = self._resolve_spec(lang, self.project_dir)
+            if spec is None or spec.server_name in started_servers:
+                continue
+            try:
+                # Auto-install if binary missing
+                if self.config.auto_install and spec.install_command:
+                    if not shutil.which(spec.command):
+                        logger.info("Binary %s missing — auto-installing", spec.command)
+                        ok = await self.auto_install(spec)
+                        if not ok:
+                            logger.warning("Auto-install failed for %s, skipping", spec.server_name)
+                            continue
+                instance = await self.ensure_server(lang, self.project_dir)
+                if instance:
+                    started.append(lang)
+                    started_servers.add(spec.server_name)
+                    logger.info("Auto-started LSP: %s (%s)", spec.server_name, lang)
+            except Exception as exc:
+                logger.warning("Failed to auto-start %s: %s", spec.server_name, exc)
+
+        if started:
+            self._emit_event("lsp_auto_detected", {
+                "languages": started,
+                "project": str(self.project_dir),
+            })
+        return started
+
     # ── File synchronization ──────────────────────────────────────────────
 
     async def notify_file_changed(

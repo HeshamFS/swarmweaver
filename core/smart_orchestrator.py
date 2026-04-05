@@ -307,6 +307,7 @@ class SmartOrchestrator:
 
         self._workers: dict[int, WorkerHandle] = {}
         self._next_worker_id = 1
+        self._registry_path = self.project_dir / ".swarmweaver" / "swarm" / "worker_registry.json"
         self._stopped = False
         self._complete = False
         self._current_client = None  # ClaudeSDKClient — set during run() for steering
@@ -402,6 +403,76 @@ class SmartOrchestrator:
         except RuntimeError:
             pass
 
+    # ── Worker Registry (append-only, survives interruptions) ────────────
+
+    def _save_worker_registry(self) -> None:
+        """Persist worker state to disk, append-only.
+
+        Loads existing registry first so previously-recorded workers
+        (from past runs) are never lost when this session ends.
+        """
+        try:
+            self._registry_path.parent.mkdir(parents=True, exist_ok=True)
+            existing = {}
+            if self._registry_path.exists():
+                try:
+                    existing = json.loads(self._registry_path.read_text(encoding="utf-8"))
+                except (json.JSONDecodeError, OSError):
+                    existing = {}
+
+            registry = {
+                "next_worker_id": self._next_worker_id,
+                "workers": existing.get("workers", {}),
+            }
+            for wid, handle in self._workers.items():
+                registry["workers"][str(wid)] = {
+                    "id": wid,
+                    "name": getattr(handle, "name", f"worker-{wid}"),
+                    "task_ids": list(getattr(handle, "assigned_task_ids", [])),
+                    "worktree_path": str(getattr(handle, "worktree_path", "")),
+                    "branch": getattr(handle, "branch_name", f"swarm/worker-{wid}"),
+                    "status": handle.status if hasattr(handle, "status") else "unknown",
+                }
+            self._registry_path.write_text(
+                json.dumps(registry, indent=2), encoding="utf-8"
+            )
+        except Exception:
+            pass
+
+    def _load_worker_registry(self) -> dict:
+        """Load worker registry; fall back to transcript if registry is missing."""
+        if self._registry_path.exists():
+            try:
+                data = json.loads(self._registry_path.read_text(encoding="utf-8"))
+                if data.get("workers"):
+                    return data
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        # Fallback: rebuild from most recent transcript
+        try:
+            from services.transcript import TranscriptReader
+            transcript_dir = self.project_dir / ".swarmweaver" / "transcripts"
+            if transcript_dir.is_dir():
+                transcripts = sorted(
+                    transcript_dir.glob("*.jsonl"),
+                    key=lambda p: p.stat().st_mtime, reverse=True,
+                )
+                if transcripts:
+                    entries = TranscriptReader.load_transcript(transcripts[0])
+                    info = TranscriptReader.detect_interruption(entries)
+                    workers = info.get("workers", {})
+                    if workers:
+                        max_id = max(workers.keys()) if workers else 0
+                        return {
+                            "next_worker_id": max_id + 1,
+                            "workers": {str(k): v for k, v in workers.items()},
+                        }
+        except Exception:
+            pass
+
+        return {}
+
     def _on_watchdog_event(self, event: dict) -> None:
         """Forward watchdog events to the main on_event callback."""
         import asyncio as _aio
@@ -485,7 +556,26 @@ class SmartOrchestrator:
                 )
                 print("[ORCHESTRATOR] LSP health loop started", flush=True)
 
-            # Analyse tasks
+            # ── RESUME: recover from previous workers BEFORE loading tasks ──
+            _registry = self._load_worker_registry()
+            _is_resume = bool(_registry and _registry.get("workers"))
+            if _is_resume:
+                self._next_worker_id = _registry.get("next_worker_id", 1)
+                print(f"[ORCHESTRATOR] RESUME: {len(_registry['workers'])} previous workers found", flush=True)
+                # Merge each worker's git branch into main
+                for _wid_str, _wdata in _registry["workers"].items():
+                    _branch = _wdata.get("branch", f"swarm/worker-{_wid_str}")
+                    _name = _wdata.get("name", f"worker-{_wid_str}")
+                    try:
+                        self._git("merge", _branch, "--no-edit", "--no-ff")
+                        print(f"[ORCHESTRATOR] Merged git branch from {_name}", flush=True)
+                    except Exception:
+                        try:
+                            self._git("merge", _branch, "--no-edit")
+                        except Exception as _me:
+                            print(f"[ORCHESTRATOR] Could not merge {_name} ({_branch}): {_me}", flush=True)
+
+            # Analyse tasks (after merge so we see the real state)
             tl = TaskList(self.project_dir)
             tl.load()
             print(f"[ORCHESTRATOR] Loaded {len(tl.tasks)} tasks from {self.project_dir}", flush=True)
@@ -1278,9 +1368,11 @@ class SmartOrchestrator:
                         except Exception as e:
                             print(f"[WARNING] Efficiency warning delivery failed: {e}", flush=True)
 
-        # Create Engine with worker task scope for MCP tool enforcement
-        # task_list_dir=worktree_path so worker_tools write to worktree's task_list;
-        # merge sync copies worktree -> main. mail_project_dir=main for report_to_orchestrator.
+        # Create Engine with worker task scope for MCP tool enforcement.
+        # task_list_dir=self.project_dir: workers write task status to MAIN project,
+        # so status survives worktree cleanup on merge. Code changes still go to
+        # the worktree (project_dir=worktree_path) and are merged via git.
+        # mail_project_dir=main for report_to_orchestrator.
         worker_max_budget = 2.0   # $2 per worker max — prevents runaway costs
         worker_max_turns = 200    # bounded turns — prevents infinite loops
         # Spawn per-worktree LSP servers for detected languages
@@ -1317,7 +1409,7 @@ class SmartOrchestrator:
             on_event=worker_on_event,
             task_scope=task_ids if task_ids else None,
             worker_id=worker_id,
-            task_list_dir=worktree_path,
+            task_list_dir=self.project_dir,
             mail_project_dir=self.project_dir,
             max_budget_usd=worker_max_budget,
             max_turns=worker_max_turns,
@@ -1344,6 +1436,7 @@ class SmartOrchestrator:
                     handle.status = "completed"
                     handle.completed_at = datetime.utcnow().isoformat() + "Z"
                     self._consecutive_spawn_failures = 0
+                    self._save_worker_registry()
                     self._mail.send(
                         sender=name, recipient="orchestrator",
                         msg_type=MessageType.WORKER_DONE.value,
@@ -1356,6 +1449,7 @@ class SmartOrchestrator:
                     handle.status = "error"
                     handle.completed_at = datetime.utcnow().isoformat() + "Z"
                     self._consecutive_spawn_failures += 1
+                    self._save_worker_registry()
                     # Reset assigned tasks to pending so orchestrator can reassign
                     try:
                         tl = TaskList(self.project_dir)
@@ -1384,6 +1478,7 @@ class SmartOrchestrator:
                     handle.status = "error"
                     handle.completed_at = datetime.utcnow().isoformat() + "Z"
                     self._consecutive_spawn_failures += 1
+                    self._save_worker_registry()
                     # Reset assigned tasks to pending so orchestrator can reassign
                     try:
                         tl = TaskList(self.project_dir)
@@ -1410,6 +1505,7 @@ class SmartOrchestrator:
                     handle.status = "error"
                     handle.completed_at = datetime.utcnow().isoformat() + "Z"
                     self._consecutive_spawn_failures += 1
+                    self._save_worker_registry()
                     # Reset assigned tasks to pending so orchestrator can reassign
                     try:
                         tl = TaskList(self.project_dir)
@@ -1453,6 +1549,7 @@ class SmartOrchestrator:
             started_at=datetime.utcnow().isoformat() + "Z",
         )
         self._workers[worker_id] = handle
+        self._save_worker_registry()
 
         # Register worker with enhanced watchdog (W4-4)
         if self._watchdog:

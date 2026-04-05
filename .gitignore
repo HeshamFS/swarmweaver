@@ -6,6 +6,7 @@ logs/
 
 # Environment variables (contains secrets)
 .env
+.vscode/
 
 # Python virtual environment
 venv/

@@ -163,6 +163,8 @@ class Engine:
         self._persistent_session_id: Optional[str] = None
         self._snapshot_mgr = None
         self._turn_number: int = 0
+        # Real-time JSONL transcript (crash-safe session recovery)
+        self._transcript = None
 
     @staticmethod
     async def _noop_event(event: dict) -> None:
@@ -175,6 +177,12 @@ class Engine:
         event_type = event.get("type", "?")
         if event_type in ("tool_start", "tool_done", "tool_input_complete", "tool_error", "tool_blocked"):
             print(f"[NATIVE EMIT] {event_type}: tool={event.get('tool', event.get('id', '?'))}", flush=True)
+        # Persist to real-time transcript (crash-safe)
+        if self._transcript is not None:
+            try:
+                self._transcript.write_event(event)
+            except Exception:
+                pass
         try:
             await self._on_event(event)
         except Exception as e:
@@ -222,6 +230,16 @@ class Engine:
             except Exception as e:
                 print(f"[Engine] SessionStore init failed (non-fatal): {e}", flush=True)
                 self._session_store = None
+
+            # Open real-time transcript for crash-safe session recovery
+            try:
+                from services.transcript import TranscriptWriter
+                _tsid = self._persistent_session_id or f"engine-{int(datetime.utcnow().timestamp())}"
+                self._transcript = TranscriptWriter(self.project_dir, _tsid)
+                self._transcript.open()
+            except Exception as e:
+                print(f"[Engine] Transcript init failed (non-fatal): {e}", flush=True)
+                self._transcript = None
 
             # Initialize shadow git snapshot manager
             try:
@@ -376,6 +394,13 @@ class Engine:
                             _extra_tools.extend(LSP_TOOL_NAMES)
                         except Exception as _lsp_err:
                             print(f"[Engine] LSP tools init failed: {_lsp_err}", flush=True)
+
+                    # Transcript: mark turn start
+                    if self._transcript is not None:
+                        try:
+                            self._transcript.write_turn_start(iteration, clean_phase, phase_model)
+                        except Exception:
+                            pass
 
                     # Create SDK client
                     client = create_client(
@@ -592,6 +617,38 @@ class Engine:
                         ctx.budget_tracker.record_usage(
                             estimated_input, estimated_output, phase_model
                         )
+
+                    # Transcript: record turn end + auto-save progress
+                    if self._transcript is not None:
+                        try:
+                            _u = usage or {}
+                            self._transcript.write_turn_end(
+                                iteration=iteration,
+                                phase=clean_phase,
+                                input_tokens=_u.get("input_tokens", 0),
+                                output_tokens=_u.get("output_tokens", 0),
+                                cost_usd=_u.get("cost_usd", 0.0),
+                            )
+                            # Auto-save progress (engine-written, not agent-dependent)
+                            _tl_tasks = getattr(ctx.task_list, "tasks", []) if ctx and ctx.task_list else []
+                            _done = sum(1 for t in _tl_tasks if getattr(t, "status", "") in ("done", "verified"))
+                            _total = len(_tl_tasks)
+                            self._transcript.write_progress(
+                                summary=f"Phase: {clean_phase}, Iteration: {iteration}, Model: {phase_model}",
+                                tasks_done=_done,
+                                tasks_total=_total,
+                            )
+                        except Exception:
+                            pass
+
+                    # Auto-save task_list.json to _task_list_dir (survives worktree cleanup)
+                    try:
+                        _auto_tl = TaskList(self._task_list_dir)
+                        _auto_tl.load()
+                        if hasattr(_auto_tl, "save"):
+                            _auto_tl.save()
+                    except Exception:
+                        pass
 
                     # Record code changes via git diff
                     try:
@@ -823,12 +880,30 @@ class Engine:
                 except Exception:
                     pass
 
+            # Close transcript (clean if completed normally, mark interrupted if stopped)
+            if self._transcript is not None:
+                try:
+                    if self._stopped:
+                        self._transcript.write_interruption()
+                        self._transcript.close(clean=False)
+                    else:
+                        self._transcript.close(clean=True)
+                except Exception:
+                    pass
+
             if self._stopped:
                 await self.emit({"type": "status", "data": "stopped"})
             else:
                 await self.emit({"type": "status", "data": "completed"})
 
         except (ProcessError, CLINotFoundError, CLIConnectionError):
+            # Mark transcript interrupted on SDK errors
+            if self._transcript is not None:
+                try:
+                    self._transcript.write_interruption()
+                    self._transcript.close(clean=False)
+                except Exception:
+                    pass
             # SDK errors must propagate for retry logic in smart_orchestrator
             raise
         except Exception as e:
@@ -841,6 +916,14 @@ class Engine:
                         error_message=str(e)[:500],
                     )
                     self._session_store.sync_to_global(self._persistent_session_id)
+                except Exception:
+                    pass
+
+            # Mark transcript interrupted on errors
+            if self._transcript is not None:
+                try:
+                    self._transcript.write_interruption()
+                    self._transcript.close(clean=False)
                 except Exception:
                     pass
 
@@ -1475,6 +1558,12 @@ class Engine:
         self._stopped = True
         self._cumulative_cache_read_tokens = 0
         self._cumulative_cache_creation_tokens = 0
+        # Mark transcript as interrupted immediately so resume detects it
+        if self._transcript is not None:
+            try:
+                self._transcript.write_interruption()
+            except Exception:
+                pass
         if self._current_client:
             try:
                 await self._current_client.interrupt()

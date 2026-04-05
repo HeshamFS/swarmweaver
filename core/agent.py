@@ -162,6 +162,42 @@ def prepare_agent_context(
     if existing_session:
         _print(f"Found existing session: {existing_session.session_id[:16]}...")
 
+    # Detect interrupted session via transcript + inject resume context
+    if resume:
+        try:
+            from services.transcript import TranscriptReader
+            transcript_dir = project_dir / ".swarmweaver" / "transcripts"
+            if transcript_dir.is_dir():
+                _transcripts = sorted(
+                    transcript_dir.glob("*.jsonl"),
+                    key=lambda p: p.stat().st_mtime, reverse=True,
+                )
+                if _transcripts:
+                    _entries = TranscriptReader.load_transcript(_transcripts[0])
+                    _info = TranscriptReader.detect_interruption(_entries)
+                    if _info.get("interrupted"):
+                        _print(
+                            f"[RESUME] Interrupted session detected "
+                            f"(turn={_info.get('last_turn', 0)}, "
+                            f"phase={_info.get('last_phase', '')}, "
+                            f"tasks={_info.get('tasks_done', 0)}/{_info.get('tasks_total', 0)})"
+                        )
+                        _resume_ctx = TranscriptReader.build_resume_context(_entries)
+                        try:
+                            _progress_file = project_dir / ".swarmweaver" / "claude-progress.txt"
+                            _progress_file.parent.mkdir(parents=True, exist_ok=True)
+                            _existing_progress = ""
+                            if _progress_file.exists():
+                                _existing_progress = _progress_file.read_text(encoding="utf-8")
+                            if "Session Recovery Context" not in _existing_progress:
+                                with open(_progress_file, "a", encoding="utf-8") as _pf:
+                                    _pf.write(f"\n\n{_resume_ctx}\n")
+                        except OSError:
+                            pass
+        except Exception:
+            pass
+
+
     # Session chain manager
     chain_manager = ChainManager(project_dir)
     if not resume:

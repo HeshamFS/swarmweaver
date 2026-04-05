@@ -217,6 +217,30 @@ async def _ws_run_native(
     else:
         print(f"[ws/run] [NATIVE] Creating Engine: mode={mode}, model={model}, project_dir={project_dir}", flush=True)
         print(f"[ws/run] [NATIVE] Options: budget={config.get('budget', 0)}, max_hours={config.get('max_hours', 0)}, approval_gates={config.get('approval_gates', False)}, resume={not no_resume}", flush=True)
+
+        # Auto-init LSP for this project (not just Smart Swarm)
+        _run_lsp_manager = None
+        try:
+            from api.state import get_lsp_manager, set_lsp_manager
+            _run_lsp_manager = get_lsp_manager(original_project_dir)
+            if not _run_lsp_manager:
+                from services.lsp_manager import LSPManager, LSPConfig
+                _lsp_cfg = LSPConfig.load(Path(original_project_dir))
+                if _lsp_cfg.enabled:
+                    _run_lsp_manager = LSPManager(
+                        original_project_dir, _lsp_cfg, on_event=on_event,
+                    )
+                    set_lsp_manager(original_project_dir, _run_lsp_manager)
+                    _run_lsp_manager.start_health_loop()
+                    try:
+                        _started = await _run_lsp_manager.auto_detect_and_start()
+                        if _started:
+                            print(f"[ws/run] LSP auto-started: {', '.join(_started)}", flush=True)
+                    except Exception as _lsp_e:
+                        print(f"[ws/run] LSP auto-detect failed: {_lsp_e}", flush=True)
+        except Exception as _le:
+            print(f"[ws/run] LSP init skipped: {_le}", flush=True)
+
         engine = Engine(
             project_dir=project_dir,
             mode=mode,
@@ -231,6 +255,7 @@ async def _ws_run_native(
             auto_pr=config.get("auto_pr", False),
             phase_models=config.get("phase_models"),
             on_event=on_event,
+            lsp_manager=_run_lsp_manager,
         )
 
     _running_engines[proc_key] = engine
@@ -501,6 +526,34 @@ async def ws_run(websocket: WebSocket):
             )
         except Exception:
             pass
+
+        # --- Replay activity log for resume (restores chat history) ---
+        if not no_resume:
+            try:
+                _replay_paths = get_paths(Path(original_project_dir))
+                _replay_file = _replay_paths.activity_log
+                if _replay_file.exists():
+                    _replay_count = 0
+                    with open(_replay_file, "r", encoding="utf-8") as _rf:
+                        for _line in _rf:
+                            _line = _line.strip()
+                            if not _line:
+                                continue
+                            try:
+                                _evt = json.loads(_line)
+                                _evt["_replay"] = True
+                                await websocket.send_json(_evt)
+                                _replay_count += 1
+                            except (json.JSONDecodeError, Exception):
+                                continue
+                    if _replay_count > 0:
+                        await websocket.send_json({
+                            "type": "replay_complete",
+                            "data": {"events_replayed": _replay_count},
+                        })
+                        print(f"[ws/run] Replayed {_replay_count} events from activity log", flush=True)
+            except Exception as _re:
+                print(f"[ws/run] Activity log replay failed (non-fatal): {_re}", flush=True)
 
         # --- SDK execution path ---
         print(f"[ws/run] Running {mode} in-process via Engine (SDK streaming)", flush=True)

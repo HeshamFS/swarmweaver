@@ -11,11 +11,27 @@ router = APIRouter()
 async def lsp_status(
     path: str = Query(..., description="Project directory"),
 ):
-    """Get status of all LSP servers."""
-    from api.state import get_lsp_manager
+    """Get status of all LSP servers. Auto-initializes + detects + installs if needed."""
+    from api.state import get_lsp_manager, set_lsp_manager
     manager = get_lsp_manager(path)
     if not manager:
-        return {"servers": [], "message": "LSP not initialized"}
+        try:
+            from services.lsp_manager import LSPManager, LSPConfig
+            lsp_config = LSPConfig.load(Path(path))
+            if lsp_config.enabled:
+                manager = LSPManager(path, lsp_config)
+                set_lsp_manager(path, manager)
+                manager.start_health_loop()
+                try:
+                    started = await manager.auto_detect_and_start()
+                    if started:
+                        print(f"[LSP] Auto-started: {', '.join(started)}", flush=True)
+                except Exception as e:
+                    print(f"[LSP] Auto-detect failed: {e}", flush=True)
+        except Exception as e:
+            print(f"[LSP] Initialization failed: {e}", flush=True)
+    if not manager:
+        return {"servers": [], "message": "LSP not available"}
 
     instances = manager.get_all_instances()
     return {
